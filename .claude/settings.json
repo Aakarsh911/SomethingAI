@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(wsl -d Ubuntu -- bash -c 'grep -rn \"datasourceUrl\\\\|adapter\" /home/jjsuckas/SomethingAI/src/generated/prisma/client.d.ts | head -30')"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+// Prisma schema. Docs: https://pris.ly/d/prisma-schema
+//
+// The connection URL is NOT declared here — in Prisma 7 the CLI reads it from
+// `datasource.url` in prisma7.config.ts, and the app supplies it at runtime
+// through the driver adapter in src/lib/db.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// No models yet — this setup deliberately wires up the connection only.
+// Add your first model below, then run:  npm run db:migrate
