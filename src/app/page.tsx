@@ -1,9 +1,23 @@
 import Image from "next/image";
+import { SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
 import styles from "./page.module.css";
 
 export default function Home() {
   return (
     <div className={styles.page}>
+      <nav className={styles.nav}>
+        <Show when="signed-out">
+          <SignInButton mode="modal">
+            <button className={styles.secondary}>Sign in</button>
+          </SignInButton>
+          <SignUpButton mode="modal">
+            <button className={styles.primary}>Sign up</button>
+          </SignUpButton>
+        </Show>
+        <Show when="signed-in">
+          <UserButton />
+        </Show>
+      </nav>
       <main className={styles.main}>
         <Image
           className={styles.logo}

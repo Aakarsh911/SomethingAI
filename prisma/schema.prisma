@@ -13,5 +13,16 @@ datasource db {
   provider = "postgresql"
 }
 
-// No models yet — this setup deliberately wires up the connection only.
-// Add your first model below, then run:  npm run db:migrate
+// Mirrors Clerk user profiles. Clerk owns auth/passwords/sessions — this
+// table exists only so app data can have a stable FK to a user. Kept in
+// sync via the webhook at src/app/api/webhooks/clerk/route.ts.
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
