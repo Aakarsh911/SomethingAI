@@ -18,6 +18,13 @@ import {
  * `userId` is the local User.id, not the Clerk id. Routes resolve one to the
  * other; this layer deliberately imports no auth so it stays testable without
  * a session.
+ *
+ * One JSONB quirk worth knowing before you build on this: Postgres does not
+ * preserve object key order (it sorts keys by length, then bytewise), so a
+ * graph read back is deep-equal to what was written but not string-equal.
+ * Dirty-checking an editor with `JSON.stringify(a) !== JSON.stringify(b)`
+ * will report a change on every load — compare with a deep equality check, or
+ * stringify both sides with recursively sorted keys.
  */
 
 /** Enough to render a list without shipping every graph blob to the client. */
