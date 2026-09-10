@@ -46,8 +46,7 @@ next-env.d.ts
 /src/generated/prisma
 
 # AI coding assistant skill docs, auto-vendored by `prisma init` — not app code
-/.claude/settings.local.json
-/.claude/skills/
-/.agents/
-/.windsurf/
-/skills-lock.json
+.claude/
+.agents/
+.windsurf/
+skills-lock.json

@@ -21,8 +21,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <ClerkProvider>
-      <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-        <body>{children}</body>
+      <html
+        lang="en"
+        className={`${geistSans.variable} ${geistMono.variable} h-full max-w-[100vw] overflow-x-hidden scheme-light-dark`}
+      >
+        <body className="flex min-h-full max-w-[100vw] flex-col overflow-x-hidden bg-white text-neutral-900 antialiased dark:bg-neutral-950 dark:text-[#ededed]">
+          {children}
+        </body>
       </html>
     </ClerkProvider>
   );
