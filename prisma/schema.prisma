@@ -1,0 +1,28 @@
+// Prisma schema. Docs: https://pris.ly/d/prisma-schema
+//
+// The connection URL is NOT declared here — in Prisma 7 the CLI reads it from
+// `datasource.url` in prisma7.config.ts, and the app supplies it at runtime
+// through the driver adapter in src/lib/db.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Mirrors Clerk user profiles. Clerk owns auth/passwords/sessions — this
+// table exists only so app data can have a stable FK to a user. Kept in
+// sync via the webhook at src/app/api/webhooks/clerk/route.ts.
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
