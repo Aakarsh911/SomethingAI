@@ -13,6 +13,9 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    // Populates the MCP catalog from src/lib/mcp/catalog.ts. Runs after
+    // `prisma migrate reset`, or on demand via `npm run db:seed`.
+    seed: "tsx prisma/seed.ts",
   },
   datasource: {
     url: directUrl,

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
 
 export default function Home() {
@@ -18,6 +19,12 @@ export default function Home() {
           </SignUpButton>
         </Show>
         <Show when="signed-in">
+          <Link
+            className="h-9 cursor-pointer rounded-full border border-[#ebebeb] bg-transparent px-4 text-sm leading-9 font-medium text-black transition-all duration-200 hover:bg-[#f2f2f2] dark:border-[#1a1a1a] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
+            href="/settings/integrations"
+          >
+            Integrations
+          </Link>
           <UserButton />
         </Show>
       </nav>

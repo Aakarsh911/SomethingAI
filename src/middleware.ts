@@ -1,6 +1,17 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
-export default clerkMiddleware();
+// Pages only. An anonymous visitor gets bounced to the sign-in screen.
+//
+// The /api/mcp routes are deliberately not protected here. `auth.protect()`
+// answers an unauthenticated API request with an HTML 404, which is a poor
+// response for a JSON endpoint and indistinguishable from a genuine missing
+// route. Each handler instead resolves the session itself and returns a JSON
+// 401, or for the browser-navigated connect routes, a redirect to /sign-in.
+export default clerkMiddleware(async (auth, request) => {
+  if (request.nextUrl.pathname.startsWith("/settings")) {
+    await auth.protect();
+  }
+});
 
 export const config = {
   matcher: [

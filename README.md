@@ -80,7 +80,8 @@ cp .env.example .env   # then edit the credentials to match step 3
 
 ```bash
 npm install            # `postinstall` runs `prisma generate`
-npm run db:migrate     # no-op until the schema has models
+npm run db:migrate     # create the tables
+npm run db:seed        # populate the MCP catalog (Gmail, ...)
 ```
 
 ### Verifying the connection
@@ -100,8 +101,10 @@ from a wrong host or a missing database.
 | --- | --- |
 | `npm run db:migrate` | Create and apply a migration (development) |
 | `npm run db:deploy` | Apply existing migrations (production/CI) |
+| `npm run db:seed` | Sync the MCP catalog from `src/lib/mcp/catalog.ts` |
 | `npm run db:generate` | Regenerate the Prisma client |
 | `npm run db:studio` | Browse data in a GUI at `localhost:5555` |
+| `npm run typecheck` | Type-check without emitting |
 
 ### How the connection is wired
 
@@ -122,16 +125,15 @@ Locally both hold the same value. The schema itself
 The generated client is written to `src/generated/prisma` and is gitignored;
 `npm install` recreates it via `postinstall`.
 
-### Adding your first model
+### Changing the schema
 
-The schema intentionally ships with **no models** — only the connection is set
-up. Add a model to `prisma/schema.prisma`, then:
+Edit `prisma/schema.prisma`, then:
 
 ```bash
 npm run db:migrate
 ```
 
-### Production
+### Production (database)
 
 Create a hosted Postgres (e.g. [Neon](https://neon.tech)), then set in your host's
 environment variables:
@@ -143,4 +145,93 @@ Set the build command so schema changes ship with the code that needs them:
 
 ```bash
 prisma generate && prisma migrate deploy && next build
+```
+
+## MCP integrations
+
+Users connect [Model Context Protocol](https://modelcontextprotocol.io) servers
+at `/settings/integrations`. Two kinds of server live in the `McpServer` table:
+
+- **Catalog entries** (`ownerId IS NULL`) — curated, visible to everyone, and
+  defined in [`src/lib/mcp/catalog.ts`](src/lib/mcp/catalog.ts). Edit that file
+  and run `npm run db:seed` to add or update one. Gmail ships by default.
+- **Custom servers** (`ownerId` set) — added by a user through the UI, visible
+  only to them. These support no auth or an API key. The hosted flow is
+  catalog-only, because it is tied to a Composio toolkit rather than to an
+  arbitrary URL.
+
+### How authorization works
+
+Catalog servers authorize through [Composio](https://composio.dev), which runs
+the provider's OAuth flow, stores and refreshes the tokens, and hosts the MCP
+server. **This app never sees a Google access token.** A connection is just a
+Composio connected account id on the `UserMcpConnection` row.
+
+The one credential this app does store is the API key for a custom API-key
+server, encrypted with AES-256-GCM
+([`src/lib/crypto.ts`](src/lib/crypto.ts)). `listServersForUser` returns a view
+type with no field for it, so it cannot reach the client by accident.
+
+The MCP endpoint itself is **not** stored. Composio mints a short-lived
+per-user session URL, and its headers carry credentials, so
+`getMcpSessionForUser`
+([`src/lib/mcp/connections.ts`](src/lib/mcp/connections.ts)) creates one at the
+point of use and it must stay server-side. One session spans every toolkit the
+user has connected, which is how Composio's tool router is designed.
+
+`McpConnectAttempt` holds the in-flight redirect. Composio's callback says what
+happened and which account resulted, but nothing trustworthy about whose
+browser it is — so an unguessable `state` travels through the round trip, and
+the user and server are read from that row rather than the query string.
+
+### Enabling Gmail
+
+Create an account at [app.composio.dev](https://app.composio.dev), copy an API
+key from **Settings → API Keys**, and set it in `.env`:
+
+```bash
+COMPOSIO_API_KEY="..."
+```
+
+That is the whole setup. On the first connect the app creates a
+Composio-managed Gmail auth config and caches its id on the server row, so
+there is no Google Cloud project, no OAuth client, and no Workspace Developer
+Preview enrollment. (Google's own Gmail MCP server would also work, but it is
+gated behind that preview programme.)
+
+To use your own Google OAuth credentials instead, build an auth config in the
+Composio dashboard and set `COMPOSIO_GMAIL_AUTH_CONFIG_ID` to its `ac_...` id.
+The pattern is `COMPOSIO_<TOOLKIT>_AUTH_CONFIG_ID`, so it generalises to any
+toolkit you add to the catalog.
+
+### Endpoints
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/mcp/servers` | Catalog + your servers, with connection state |
+| `POST` | `/api/mcp/servers` | Add a custom server |
+| `DELETE` | `/api/mcp/servers/:id` | Remove a custom server you own |
+| `GET` | `/api/mcp/connections` | Only the servers you have connected |
+| `DELETE` | `/api/mcp/connections/:serverId` | Revoke upstream and disconnect |
+| `GET` | `/api/mcp/connect/:serverId/start` | Begin authorization (a redirect) |
+| `GET` | `/api/mcp/connect/callback` | Composio redirect target |
+
+### Adding another toolkit
+
+Anything in [Composio's toolkit catalog](https://composio.dev/toolkits) works.
+Add an entry to `src/lib/mcp/catalog.ts` with `authType: "COMPOSIO"` and the
+toolkit slug, then run `npm run db:seed`:
+
+```ts
+{
+  slug: "slack",
+  name: "Slack",
+  description: "Read and post messages in your Slack workspace.",
+  url: null,
+  transport: "HTTP",
+  authType: "COMPOSIO",
+  composioToolkit: "slack",
+  iconUrl: null,
+  docsUrl: "https://composio.dev/toolkits/slack",
+}
 ```
