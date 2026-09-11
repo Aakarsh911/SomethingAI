@@ -26,6 +26,145 @@ model User {
   workflows Workflow[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  mcpConnections  UserMcpConnection[]
+  mcpConnectAttempts McpConnectAttempt[]
+  mcpServers      McpServer[]         @relation("UserOwnedMcpServers")
+}
+
+enum McpTransport {
+  HTTP
+  SSE
+  STDIO
+}
+
+enum McpAuthType {
+  // Nothing to authorize; the endpoint is open.
+  NONE
+  // The user pastes a key, which we encrypt and store.
+  API_KEY
+  // Composio brokers the provider's OAuth flow and holds the tokens. We only
+  // keep the id of the resulting connected account.
+  COMPOSIO
+}
+
+enum McpConnectionStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  REVOKED
+}
+
+// An MCP server that can be connected to. Two flavours live in this table:
+//
+//   ownerId == null  ->  curated catalog entry, visible to everyone (e.g. Gmail).
+//                        Created by prisma/seed.ts from src/lib/mcp/catalog.ts.
+//   ownerId != null  ->  a server one user added themselves, visible only to them.
+//
+// `slug` is globally unique rather than unique-per-owner because Postgres treats
+// NULLs as distinct, so `@@unique([ownerId, slug])` would not actually stop two
+// catalog rows from sharing a slug. Custom servers get a random suffix appended
+// at creation time (see slugifyServerName in src/lib/mcp/servers.ts).
+model McpServer {
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String
+  description String?
+  iconUrl     String?
+  docsUrl     String?
+
+  // Endpoint the MCP client talks to. Null for COMPOSIO servers: Composio
+  // mints a short-lived per-user session URL at call time, so there is no
+  // stable address to record here.
+  url       String?
+  transport McpTransport @default(HTTP)
+  authType  McpAuthType  @default(COMPOSIO)
+
+  // Composio toolkit slug, e.g. "gmail". Set when authType is COMPOSIO.
+  composioToolkit String?
+
+  // Composio auth config ("ac_...") backing this toolkit. Created on first
+  // connect and cached here so every later user reuses the same one — a new
+  // auth config per user would fragment Composio's account management.
+  composioAuthConfigId String?
+
+  // Lets us retire a catalog entry without deleting rows that reference it.
+  isEnabled Boolean @default(true)
+
+  ownerId String?
+  owner   User?   @relation("UserOwnedMcpServers", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  connections UserMcpConnection[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+// One user's link to one MCP server, including the credentials to call it.
+model UserMcpConnection {
+  id       String @id @default(cuid())
+  userId   String
+  serverId String
+
+  user   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server McpServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  status McpConnectionStatus @default(PENDING)
+
+  // API key for an API_KEY server, encrypted at rest with AES-256-GCM
+  // (src/lib/crypto.ts). Never leaves the server: the API serializes
+  // connections through a view type that has no field for it.
+  credential String?
+
+  // Composio connected account ("ca_..."). Composio stores the OAuth tokens
+  // and refreshes them, so this app never sees provider credentials.
+  externalAccountId String?
+
+  // Human-readable identity of the connected account, e.g. the Google address.
+  accountLabel String?
+
+  // Last failure from a token refresh or tool call, surfaced in the UI.
+  lastError String?
+
+  connectedAt DateTime?
+  lastUsedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, serverId])
+  @@index([userId])
+}
+
+// Short-lived record tying an in-flight authorization redirect back to the
+// user who started it.
+//
+// Composio's callback tells us the outcome and the connected account id, but
+// nothing trustworthy about who the browser belongs to. Carrying an
+// unguessable `state` through the round trip, and reading the user and server
+// from this row instead of the query string, is what stops a forged callback
+// from attaching an attacker's mailbox to someone else's account. Rows are
+// single-use and swept on expiry.
+model McpConnectAttempt {
+  id       String @id @default(cuid())
+  state    String @unique
+  userId   String
+  serverId String
+  returnTo String?
+
+  // Composio's connection request id, kept so the callback can confirm the
+  // account it is handed belongs to the request we started.
+  externalRequestId String?
+
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 enum WorkflowTrigger {
