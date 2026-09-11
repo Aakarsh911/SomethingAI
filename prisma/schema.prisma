@@ -219,6 +219,28 @@ model Workflow {
   /// it is first saved, while the user is still editing it.
   isEnabled Boolean         @default(false)
 
+  /// Standard five-field cron expression, interpreted in `timezone` — NOT in
+  /// UTC. Set when trigger is SCHEDULE, null otherwise.
+  cron String?
+
+  /// IANA zone the cron is read in, e.g. "Asia/Kolkata". Captured from the
+  /// user's device unless they say otherwise.
+  ///
+  /// Required alongside `cron`, and not redundant with storing `nextRunAt` in
+  /// UTC: "every Thursday at 09:00" is a different UTC instant before and
+  /// after a DST transition, so converting once and discarding the zone makes
+  /// a recurring job drift by an hour twice a year. Zones without DST hide
+  /// the bug entirely, which is why it survives testing.
+  timezone String?
+
+  /// When this workflow is next due, in UTC. Derived from `cron` + `timezone`
+  /// on save and recomputed after each run.
+  ///
+  /// This is what makes a scheduler affordable: the runner selects on an index
+  /// rather than evaluating every cron expression on every tick.
+  nextRunAt DateTime?
+  lastRunAt DateTime?
+
   runs WorkflowRun[]
 
   createdAt DateTime @default(now())
@@ -226,6 +248,8 @@ model Workflow {
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([serverSlugs], type: Gin)
+  /// Serves the scheduler's only hot query: due, enabled workflows.
+  @@index([isEnabled, nextRunAt])
 }
 
 /// One execution of a workflow.

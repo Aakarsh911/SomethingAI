@@ -47,6 +47,21 @@ const triggerNode = z.object({
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
+/**
+ * Transforms the previous step's output with a language model.
+ *
+ * Summarising, rewriting, extracting and classifying are the glue between
+ * tool calls, and none of them is an MCP tool — asking a workflow to
+ * "summarise my mail" is unbuildable without this node kind.
+ */
+const llmNode = z.object({
+  id: nodeId,
+  kind: z.literal("llm"),
+  label: z.string().max(200).optional(),
+  /** What to do with the incoming data, in plain language. */
+  instruction: z.string().min(1).max(4000),
+});
+
 /** Routes to different edges based on a condition the executor evaluates. */
 const branchNode = z.object({
   id: nodeId,
@@ -55,7 +70,12 @@ const branchNode = z.object({
   condition: z.string().max(2000),
 });
 
-const node = z.discriminatedUnion("kind", [triggerNode, toolNode, branchNode]);
+const node = z.discriminatedUnion("kind", [
+  triggerNode,
+  toolNode,
+  llmNode,
+  branchNode,
+]);
 
 const edge = z.object({
   from: nodeId,
