@@ -23,6 +23,7 @@ model User {
   firstName String?
   lastName  String?
   imageUrl  String?
+  workflows Workflow[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -164,4 +165,133 @@ model McpConnectAttempt {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+enum WorkflowTrigger {
+  MANUAL
+  SCHEDULE
+  WEBHOOK
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+/// A user-authored automation: a graph of steps that call MCP tools.
+///
+/// The graph itself is a JSON blob rather than a table of step rows. Node
+/// kinds and their config shapes are still changing weekly, and a relational
+/// layout would mean a migration for every new node type. The tradeoff is
+/// that Postgres cannot enforce anything about the blob's contents — see
+/// `serverSlugs` below for how the one reference we do need to query is kept
+/// reachable.
+model Workflow {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  /// `{ nodes: [...], edges: [...] }`. Validated in the app layer by the Zod
+  /// schema in src/lib/workflows/graph.ts, never by the database.
+  graph Json
+
+  /// Shape version of `graph`, bumped when the blob's structure changes in a
+  /// way older readers cannot handle. Stored per row so a migration can
+  /// rewrite blobs incrementally instead of in one locking pass.
+  graphVersion Int @default(1)
+
+  /// Every MCP server slug referenced anywhere in `graph`, flattened on save.
+  ///
+  /// Derived data, and denormalised on purpose: answering "which workflows
+  /// break if this user disconnects Gmail?" by parsing every blob does not
+  /// scale, and a JSON containment query cannot use a plain index. Kept in
+  /// sync by saveWorkflow() — nothing else should write it.
+  serverSlugs String[]
+
+  trigger   WorkflowTrigger @default(MANUAL)
+  /// Disabled by default: a workflow should not fire on a schedule the moment
+  /// it is first saved, while the user is still editing it.
+  isEnabled Boolean         @default(false)
+
+  runs WorkflowRun[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([serverSlugs], type: Gin)
+}
+
+/// One execution of a workflow.
+model WorkflowRun {
+  id         String   @id @default(cuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  status  RunStatus       @default(QUEUED)
+  trigger WorkflowTrigger
+
+  /// The graph exactly as it was when this run started.
+  ///
+  /// Without the copy, editing a workflow silently rewrites the history of
+  /// every run that came before the edit, and a failed run can no longer be
+  /// read against the steps that actually produced it.
+  graphSnapshot Json
+  graphVersion  Int
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  /// Failure summary for the run as a whole. Per-step detail lives on
+  /// WorkflowStepRun.error.
+  error      String?
+
+  stepRuns WorkflowStepRun[]
+
+  createdAt DateTime @default(now())
+
+  @@index([workflowId, createdAt(sort: Desc)])
+  @@index([status])
+}
+
+/// One step within a run.
+///
+/// Relational rather than another blob, because this is the table that gets
+/// filtered and aggregated: failures by tool, latency by server, retry counts.
+model WorkflowStepRun {
+  id    String      @id @default(cuid())
+  runId String
+  run   WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  /// Identifies the node inside the run's `graphSnapshot`. Not a foreign key —
+  /// nodes are not rows.
+  nodeId String
+
+  /// Copied off the node so step history survives the server being deleted,
+  /// and so "every Gmail call that failed this week" is one indexed query.
+  serverSlug String?
+  toolSlug   String?
+
+  status  RunStatus @default(QUEUED)
+  /// 1 for the first try. Retries append rows rather than overwriting, so the
+  /// full history of a flaky step stays visible.
+  attempt Int       @default(1)
+
+  input  Json?
+  output Json?
+  error  String?
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([runId, nodeId, attempt])
+  @@index([runId])
+  @@index([serverSlug, status])
 }
