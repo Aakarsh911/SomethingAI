@@ -18,6 +18,7 @@ type Draft = {
   cron: string | null;
   timezone: string | null;
   scheduleLabel: string | null;
+  droppedArgs: string[];
   steps: DraftStep[];
 };
 
@@ -194,6 +195,15 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
                 </li>
               ))}
             </ol>
+
+            {draft.droppedArgs.length > 0 && (
+              <p className="text-sm text-[#666] dark:text-[#999]">
+                Ignored arguments the tool does not accept:{" "}
+                <span className="font-mono text-xs break-all">
+                  {draft.droppedArgs.join(", ")}
+                </span>
+              </p>
+            )}
 
             <div className="flex items-center gap-4">
               <button

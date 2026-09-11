@@ -8,6 +8,7 @@ import {
 } from "@/lib/workflows/graph";
 import { assertValidSchedule, describeSchedule } from "@/lib/workflows/schedule";
 import {
+  reconcileToolInputs,
   renderToolsForPrompt,
   type AvailableTool,
 } from "@/lib/ai/tool-catalog";
@@ -87,6 +88,12 @@ export type WorkflowDraft = {
   timezone: string | null;
   /** Rendered schedule for the confirmation screen, e.g. "Every Thursday at 09:00". */
   scheduleLabel: string | null;
+  /**
+   * Arguments the model invented that the tool does not accept, as
+   * "TOOL_SLUG.key". Surfaced rather than swallowed so a step that lost an
+   * argument is visible before the workflow is saved.
+   */
+  droppedArgs: string[];
   steps: {
     kind: "tool" | "llm";
     serverSlug: string | null;
@@ -125,11 +132,21 @@ RULES
 4. If no recurrence is described, trigger is MANUAL and cron and timezone are
    both null.
 5. Pick a concrete hour for vague times: "morning" is 09:00, "evening" 18:00.
-6. "name" is a short label, under 60 characters.`;
+6. Use only the argument names listed under "args" for each tool, spelled
+   exactly as shown. Do not invent argument names and do not rewrite them
+   into prose — "max_results", never "max results".
+7. "name" is a short label, under 60 characters.`;
 }
 
 /** Assembles a linear graph from the model's plan. */
-function planToGraph(plan: z.infer<typeof planSchema>): WorkflowGraph {
+function planToGraph(
+  plan: z.infer<typeof planSchema>,
+  tools: AvailableTool[],
+): { graph: WorkflowGraph; droppedArgs: string[] } {
+  const byKey = new Map(
+    tools.map((tool) => [`${tool.serverSlug}:${tool.toolSlug}`, tool]),
+  );
+  const droppedArgs: string[] = [];
   const nodes: unknown[] = [
     { id: "trigger", kind: "trigger", label: "Start", config: {} },
   ];
@@ -160,6 +177,17 @@ function planToGraph(plan: z.infer<typeof planSchema>): WorkflowGraph {
         inputs = {};
       }
 
+      // The model names arguments from memory, so reconcile against the
+      // tool's real input schema before the graph is built.
+      const tool = byKey.get(`${step.serverSlug}:${step.toolSlug}`);
+      if (tool) {
+        const reconciled = reconcileToolInputs(inputs, tool.parameters);
+        inputs = reconciled.inputs;
+        droppedArgs.push(
+          ...reconciled.dropped.map((key) => `${step.toolSlug}.${key}`),
+        );
+      }
+
       nodes.push({
         id,
         kind: "tool",
@@ -182,7 +210,7 @@ function planToGraph(plan: z.infer<typeof planSchema>): WorkflowGraph {
         .join("; ")}`,
     );
   }
-  return result.data;
+  return { graph: result.data, droppedArgs };
 }
 
 export async function generateWorkflowDraft(input: {
@@ -258,10 +286,13 @@ export async function generateWorkflowDraft(input: {
     scheduleLabel = describeSchedule(cron, timezone);
   }
 
+  const assembled = planToGraph(plan, input.tools);
+
   return {
     name: plan.name.slice(0, 60),
     description: plan.description,
-    graph: planToGraph(plan),
+    graph: assembled.graph,
+    droppedArgs: assembled.droppedArgs,
     trigger: plan.trigger,
     cron,
     timezone,
