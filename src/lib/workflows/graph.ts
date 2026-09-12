@@ -19,6 +19,13 @@ const nodeId = z
   // keep them to a conservative character set rather than accepting any string.
   .regex(/^[A-Za-z0-9_-]+$/, "Node ids may only contain letters, digits, - and _");
 
+const position = z
+  .object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+  })
+  .default({ x: 0, y: 0 });
+
 /**
  * Calls a tool on a connected MCP server.
  *
@@ -33,6 +40,7 @@ const toolNode = z.object({
   id: nodeId,
   kind: z.literal("tool"),
   label: z.string().max(200).optional(),
+  position,
   serverSlug: z.string().min(1).max(128),
   toolSlug: z.string().min(1).max(200),
   /** Argument template. Placeholders are resolved by the executor, not here. */
@@ -44,6 +52,7 @@ const triggerNode = z.object({
   id: nodeId,
   kind: z.literal("trigger"),
   label: z.string().max(200).optional(),
+  position,
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -52,6 +61,7 @@ const branchNode = z.object({
   id: nodeId,
   kind: z.literal("branch"),
   label: z.string().max(200).optional(),
+  position,
   condition: z.string().max(2000),
 });
 
@@ -113,6 +123,23 @@ export const graphSchema = z
 
 export type WorkflowGraph = z.infer<typeof graphSchema>;
 export type WorkflowNode = z.infer<typeof node>;
+export type WorkflowEdge = WorkflowGraph["edges"][number];
+
+/** A new workflow starts as a single trigger so the Zod invariant holds. */
+export function emptyGraph(): WorkflowGraph {
+  return {
+    nodes: [
+      {
+        id: "trigger",
+        kind: "trigger",
+        label: "When started",
+        position: { x: 80, y: 180 },
+        config: {},
+      },
+    ],
+    edges: [],
+  };
+}
 
 /**
  * Validates an untrusted value as a graph.
