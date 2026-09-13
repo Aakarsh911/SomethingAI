@@ -12,7 +12,9 @@ const PROTECTED_PREFIXES = ["/settings", "/workflows"];
 export default clerkMiddleware(async (auth, request) => {
   const { pathname } = request.nextUrl;
   if (PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-    await auth.protect();
+    await auth.protect({
+      unauthenticatedUrl: new URL("/sign-in", request.url).toString(),
+    });
   }
 });
 

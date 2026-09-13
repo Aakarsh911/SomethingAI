@@ -147,8 +147,16 @@ function planToGraph(
     tools.map((tool) => [`${tool.serverSlug}:${tool.toolSlug}`, tool]),
   );
   const droppedArgs: string[] = [];
+  // Laid out left-to-right rather than left to default to (0, 0): the studio
+  // canvas positions nodes from these coordinates, and a generated workflow
+  // would otherwise open as a single stack of overlapping cards.
+  const LANE_Y = 180;
+  const COLUMN_X = 80;
+  const COLUMN_GAP = 260;
+  const at = (index: number) => ({ x: COLUMN_X + index * COLUMN_GAP, y: LANE_Y });
+
   const nodes: unknown[] = [
-    { id: "trigger", kind: "trigger", label: "Start", config: {} },
+    { id: "trigger", kind: "trigger", label: "Start", position: at(0), config: {} },
   ];
   const edges: unknown[] = [];
 
@@ -162,6 +170,7 @@ function planToGraph(
         id,
         kind: "llm",
         label,
+        position: at(index + 1),
         instruction: step.instruction ?? step.purpose,
       });
     } else {
@@ -192,6 +201,7 @@ function planToGraph(
         id,
         kind: "tool",
         label,
+        position: at(index + 1),
         serverSlug: step.serverSlug,
         toolSlug: step.toolSlug,
         inputs,

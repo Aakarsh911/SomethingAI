@@ -1,39 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SomethingAI
+
+Natural language → MCP workflow graph platform.
+
+A user describes an automation in plain English — for example, *“every day at 9am, message my co-founder for a status update, and based on their reply either log it or ping me about a blocker.”* The app compiles that description into a directed graph of MCP (Model Context Protocol) tool calls with conditional branching, stores the graph, and executes it on a schedule or trigger. Runs can wait hours or days, retry a failed step, and hold for human approval before a risky action such as sending a message.
+
+Think Zapier or n8n, except the automation is described in natural language and driven by an LLM agent calling MCP tools, not a static if-this-then-that wizard.
+
+## Core user flow
+
+1. The user describes a workflow in a chat interface.
+2. The LLM compiles it into a structured workflow graph (JSON): nodes are triggers, MCP tool calls, LLM transforms, branches, and waits; edges are data flow and control flow.
+3. The compiled graph is shown back in plain English *and* as an editable visual node graph (React Flow) before saving.
+4. Saved workflows run on their trigger — a cron-style time trigger, or an event such as an incoming email or Slack message.
+5. Execution is a durable workflow engine (Temporal), so a run can pause for a reply, retry a failed step, or wait for human approval without losing state.
+6. Every run is logged (per-node input/output, status, timestamps) and viewable in run history / a live execution view.
+
+## What is built now
+
+- **Auth and tenants:** Clerk, with a local `User` row for application data.
+- **MCP connections:** `/settings/integrations` — catalog servers (Composio-brokered, e.g. Gmail) and user-owned custom servers. Tokens stay with Composio or are AES-256-GCM encrypted API keys.
+- **Workflow studio:** `/workflows` — sidebar to add and delete workflows (delete asks for confirmation), React Flow canvas, right-click → add a node from the user's connected MCP servers, drag handles to connect nodes.
+- **Graph storage:** Postgres. `Workflow.graph` is the working copy (JSONB). Each save also appends an immutable `WorkflowVersion` row so history can be restored without rewriting earlier snapshots. Node kinds are validated by Zod in [`src/lib/workflows/graph.ts`](src/lib/workflows/graph.ts) before anything is written — the database does not enforce blob shape.
+- **Run tables:** `WorkflowRun` (with a `graphSnapshot` of what actually executed) and `WorkflowStepRun` exist for the future executor.
+
+The chat compiler, Temporal interpreter, live run highlighting, and approval gates are not built yet. The studio writes the same graph format those pieces will consume.
+
+## Tech stack
+
+| Layer | Choice | Role |
+| --- | --- | --- |
+| Frontend | Next.js (App Router) | App, studio, integrations |
+| Graph canvas | React Flow (xyflow) | Visual editor and, later, live execution highlighting |
+| NL → graph compiler | Claude with structured/tool-call output, Zod-validated server-side | Never persist raw LLM JSON |
+| Graph & run storage | Postgres via Prisma 7 | `Workflow`, `WorkflowVersion`, `WorkflowRun`, `WorkflowStepRun`; graphs as JSONB |
+| Execution engine | Temporal (TypeScript SDK) | Durable waits, per-activity retries, approval signals |
+| MCP | `@modelcontextprotocol/sdk` + Composio for hosted auth | Isolated activity per server call |
+| Auth | Clerk | Multi-tenant; viewer / editor / admin later |
+| Secrets | Encrypted columns today; Infisical/Doppler/KMS later | OAuth tokens never stored in the clear |
+| Real-time execution | Redis pub/sub + WebSockets (or Supabase Realtime) | Node-by-node canvas updates |
+| Observability | OpenTelemetry + Axiom or Sentry | Native Temporal traces |
+| Deployment | Vercel (app), Temporal Cloud or Fly.io, MCP servers on Fly.io / Cloud Run | |
+
+## Key architectural decision
+
+The compiler emits a **generic graph** interpreted by **one generic Temporal workflow**. Users create arbitrary shapes at runtime — we cannot redeploy code for every new workflow — so Temporal is a graph interpreter, not a generated template.
+
+The graph is the source of truth, not the chat transcript. Chat is one way to edit the graph; the visual editor must represent and modify anything the compiler produces.
+
+## Design principles
+
+- **Never auto-execute risky actions on a new workflow.** First runs, and anything that sends a message, posts publicly, or spends money, require human approval by default. Auto-approval is opt-in after clean runs.
+- **Isolate failure per MCP node.** One dead server fails one node, not the run.
+- **Idempotency matters.** Retrying a step must never double-send a message.
+- **Show the plain-English interpretation before saving.** Catch misunderstandings before a workflow goes live.
+- **The graph is the source of truth.** The editor and the compiler share one Zod schema.
+
+## Not building yet
+
+- A no-code visual-only builder with no NL layer — the compiler is the differentiator.
+- Our own OAuth layer for every service — Composio is the connection broker unless it falls short.
+- Enterprise governance (SSO, SCIM, org-wide policy) — post-MVP.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+nvm use          # Node 22, see .nvmrc
+npm install
+cp .env.example .env
+npm run db:migrate
+npm run db:seed
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open [http://localhost:3000](http://localhost:3000). Signed-in users land on `/workflows`.
 
 ## Database
 
@@ -215,6 +254,12 @@ toolkit you add to the catalog.
 | `DELETE` | `/api/mcp/connections/:serverId` | Revoke upstream and disconnect |
 | `GET` | `/api/mcp/connect/:serverId/start` | Begin authorization (a redirect) |
 | `GET` | `/api/mcp/connect/callback` | Composio redirect target |
+| `GET` | `/api/workflows` | List the caller's workflows |
+| `POST` | `/api/workflows` | Create a workflow (empty graph = one trigger) |
+| `GET` | `/api/workflows/:id` | Working graph + version list |
+| `PATCH` | `/api/workflows/:id` | Rename or save a new graph revision |
+| `DELETE` | `/api/workflows/:id` | Delete a workflow and its history |
+| `POST` | `/api/workflows/:id/versions/:revision/restore` | Copy an old snapshot forward as a new revision |
 
 ### Adding another toolkit
 
@@ -235,3 +280,15 @@ toolkit slug, then run `npm run db:seed`:
   docsUrl: "https://composio.dev/toolkits/slack",
 }
 ```
+
+## Workflow graphs and version history
+
+`Workflow.graph` is the editor's working copy. On create and on every graph
+save, `save` also inserts a `WorkflowVersion` row (`revision`, `graph` JSONB,
+`note`). Restoring v3 copies that blob onto the working copy and appends a
+*new* revision (`Restored from v3`) — older rows are never updated.
+
+Postgres does not preserve JSON object key order. Compare graphs with a deep
+equality check (or stringify after sorting keys), not a raw `JSON.stringify`.
+The Zod schema in `src/lib/workflows/graph.ts` is what keeps malformed graphs
+out of both tables.

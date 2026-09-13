@@ -241,7 +241,8 @@ model Workflow {
   nextRunAt DateTime?
   lastRunAt DateTime?
 
-  runs WorkflowRun[]
+  runs     WorkflowRun[]
+  versions WorkflowVersion[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -250,6 +251,32 @@ model Workflow {
   @@index([serverSlugs], type: Gin)
   /// Serves the scheduler's only hot query: due, enabled workflows.
   @@index([isEnabled, nextRunAt])
+}
+
+/// Immutable snapshot of a workflow graph.
+///
+/// `Workflow.graph` is the working copy the editor writes to. Each successful
+/// save also appends a row here so the user can restore an earlier shape
+/// without us having rewritten history. The blob is JSONB for the same reason
+/// `Workflow.graph` is: node kinds still change, and a relational layout would
+/// mean a migration per new node type.
+///
+/// `revision` is the user-facing version number (1, 2, 3…). `graphVersion` is
+/// the *schema* version of the blob, matching `Workflow.graphVersion`.
+model WorkflowVersion {
+  id         String   @id @default(cuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  revision     Int
+  graph        Json
+  graphVersion Int
+  note         String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([workflowId, revision])
+  @@index([workflowId, createdAt(sort: Desc)])
 }
 
 /// One execution of a workflow.

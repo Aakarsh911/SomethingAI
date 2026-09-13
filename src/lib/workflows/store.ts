@@ -4,6 +4,7 @@ import type { RunStatus, WorkflowTrigger } from "@/generated/prisma/enums";
 import {
   CURRENT_GRAPH_VERSION,
   collectServerSlugs,
+  parseGraph,
   type WorkflowGraph,
 } from "@/lib/workflows/graph";
 import { ScheduleError, nextRunAt } from "@/lib/workflows/schedule";
@@ -72,6 +73,7 @@ export type WorkflowInput = {
   cron?: string | null;
   /** IANA zone the cron is read in. Required alongside `cron`. */
   timezone?: string | null;
+  versionNote?: string | null;
 };
 
 type ResolvedSchedule = {
@@ -108,33 +110,70 @@ function resolveSchedule(
   return { cron, timezone, nextRunAt: nextRunAt(cron, timezone, from) };
 }
 
+export type WorkflowVersionSummary = {
+  id: string;
+  revision: number;
+  note: string | null;
+  createdAt: Date;
+};
+
+export function listVersions(
+  userId: string,
+  workflowId: string,
+): Promise<WorkflowVersionSummary[]> {
+  return prisma.workflowVersion.findMany({
+    where: { workflowId, workflow: { userId } },
+    select: { id: true, revision: true, note: true, createdAt: true },
+    orderBy: { revision: "desc" },
+  });
+}
+
+export function getVersion(userId: string, workflowId: string, revision: number) {
+  return prisma.workflowVersion.findFirst({
+    where: { workflowId, revision, workflow: { userId } },
+  });
+}
+
 export function createWorkflow(userId: string, input: WorkflowInput) {
   const trigger = input.trigger ?? "MANUAL";
+  // Outside the transaction on purpose: an invalid cron should fail before a
+  // transaction is opened, not roll one back.
   const schedule = resolveSchedule(trigger, input.cron, input.timezone);
 
-  return prisma.workflow.create({
-    data: {
-      userId,
-      name: input.name,
-      description: input.description ?? null,
-      graph: input.graph as unknown as Prisma.InputJsonValue,
-      graphVersion: CURRENT_GRAPH_VERSION,
-      // Derived from the graph rather than accepted from the caller, so the
-      // column cannot drift out of sync with the blob it summarises.
-      serverSlugs: collectServerSlugs(input.graph),
-      trigger,
-      isEnabled: input.isEnabled ?? false,
-      ...schedule,
-    },
+  return prisma.$transaction(async (tx) => {
+    const workflow = await tx.workflow.create({
+      data: {
+        userId,
+        name: input.name,
+        description: input.description ?? null,
+        graph: input.graph as unknown as Prisma.InputJsonValue,
+        graphVersion: CURRENT_GRAPH_VERSION,
+        // Derived from the graph rather than accepted from the caller, so the
+        // column cannot drift out of sync with the blob it summarises.
+        serverSlugs: collectServerSlugs(input.graph),
+        trigger,
+        isEnabled: input.isEnabled ?? false,
+        ...schedule,
+      },
+    });
+
+    await tx.workflowVersion.create({
+      data: {
+        workflowId: workflow.id,
+        revision: 1,
+        graph: input.graph as unknown as Prisma.InputJsonValue,
+        graphVersion: CURRENT_GRAPH_VERSION,
+        note: input.versionNote ?? "Created",
+      },
+    });
+
+    return workflow;
   });
 }
 
 /**
  * Returns null if the workflow is missing or not owned by `userId`.
- *
- * `updateMany` rather than `update`: it filters on non-unique columns without
- * relying on extended-where-unique, and a mismatched owner yields count 0
- * instead of an exception that has to be distinguished from a real fault.
+ * Graph saves append a WorkflowVersion row; name-only edits do not.
  */
 export async function updateWorkflow(
   userId: string,
@@ -155,6 +194,8 @@ export async function updateWorkflow(
     data.serverSlugs = collectServerSlugs(input.graph);
   }
 
+  // Computed before the transaction so an invalid cron aborts without having
+  // opened one.
   const trigger = input.trigger ?? current.trigger;
   const touchesSchedule =
     input.trigger !== undefined ||
@@ -177,12 +218,58 @@ export async function updateWorkflow(
     );
   }
 
-  const { count } = await prisma.workflow.updateMany({
-    where: { id, userId },
-    data,
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.workflow.findFirst({
+      where: { id, userId },
+      select: { id: true },
+    });
+    if (!existing) return null;
+
+    await tx.workflow.update({ where: { id }, data });
+
+    if (input.graph !== undefined) {
+      const last = await tx.workflowVersion.findFirst({
+        where: { workflowId: id },
+        orderBy: { revision: "desc" },
+        select: { revision: true },
+      });
+
+      await tx.workflowVersion.create({
+        data: {
+          workflowId: id,
+          revision: (last?.revision ?? 0) + 1,
+          graph: input.graph as unknown as Prisma.InputJsonValue,
+          graphVersion: CURRENT_GRAPH_VERSION,
+          note: input.versionNote ?? null,
+        },
+      });
+    }
+
+    return tx.workflow.findFirst({ where: { id, userId } });
   });
 
-  return count === 0 ? null : getWorkflow(userId, id);
+  return updated;
+}
+
+/**
+ * Copies an earlier snapshot onto the working graph and appends a new
+ * revision. History rows are never rewritten.
+ */
+export async function restoreWorkflowVersion(
+  userId: string,
+  workflowId: string,
+  revision: number,
+) {
+  const version = await getVersion(userId, workflowId, revision);
+  if (!version) return null;
+
+  const parsed = parseGraph(version.graph);
+  if (!parsed.success) return null;
+
+  return updateWorkflow(userId, workflowId, {
+    graph: parsed.data,
+    versionNote: `Restored from v${revision}`,
+  });
 }
 
 /**
