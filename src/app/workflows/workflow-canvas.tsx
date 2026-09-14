@@ -24,11 +24,12 @@ import {
   type FlowNode,
 } from "@/lib/workflows/flow";
 import type { WorkflowGraph } from "@/lib/workflows/graph";
-import { BranchNode, ToolNode, TriggerNode } from "./workflow-nodes";
+import { BranchNode, LlmNode, ToolNode, TriggerNode } from "./workflow-nodes";
 
 const nodeTypes = {
   trigger: TriggerNode,
   tool: ToolNode,
+  llm: LlmNode,
   branch: BranchNode,
 };
 

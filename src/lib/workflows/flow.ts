@@ -6,6 +6,12 @@ export type FlowNodeData = {
   label: string;
   serverSlug?: string;
   toolSlug?: string;
+  /**
+   * Carried through the canvas so a round trip keeps it. An llm node whose
+   * instruction is lost is indistinguishable from a trigger on the way back,
+   * and the graph then fails validation with two triggers.
+   */
+  instruction?: string;
 };
 
 export type FlowNode = Node<FlowNodeData>;
@@ -25,6 +31,7 @@ export function graphToFlow(graph: WorkflowGraph): {
         label: node.label ?? defaultLabel(node),
         serverSlug: node.kind === "tool" ? node.serverSlug : undefined,
         toolSlug: node.kind === "tool" ? node.toolSlug : undefined,
+        instruction: node.kind === "llm" ? node.instruction : undefined,
       },
       deletable: node.kind !== "trigger",
     })),
@@ -76,6 +83,21 @@ export function flowToGraph(
         };
       }
 
+      if (existing?.kind === "llm" || node.data.kind === "llm") {
+        return {
+          id: node.id,
+          kind: "llm" as const,
+          label,
+          position,
+          // The schema requires a non-empty instruction, so fall back to the
+          // label rather than emitting a node the save would reject.
+          instruction:
+            node.data.instruction ??
+            (existing && existing.kind === "llm" ? existing.instruction : undefined) ??
+            label,
+        };
+      }
+
       return {
         id: node.id,
         kind: "trigger" as const,
@@ -98,6 +120,7 @@ export function edgeId(from: string, to: string, when: WorkflowEdge["when"] = "a
 
 function defaultLabel(node: WorkflowNode): string {
   if (node.kind === "tool") return node.serverSlug;
+  if (node.kind === "llm") return "Model step";
   if (node.kind === "branch") return "Branch";
   return "When started";
 }
