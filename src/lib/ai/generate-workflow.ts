@@ -58,6 +58,29 @@ const stepSchema = z.object({
     .describe('Tool arguments as a JSON object string, e.g. {"query":"is:unread"}. Use {} if none or for an llm step.'),
 });
 
+/**
+ * One thing the model needs the user to tell it.
+ *
+ * Asking costs a round trip; guessing costs a workflow that runs for weeks
+ * against the wrong recipient or the wrong label. The `id` is what the answer
+ * comes back keyed by, so it has to be stable across the two turns.
+ */
+const questionSchema = z.object({
+  id: z
+    .string()
+    .describe('Stable snake_case key for this question, e.g. "recipient_email".'),
+  question: z.string().describe("One line, addressed to the user."),
+  why: z
+    .string()
+    .describe("What the workflow cannot do without it, in one short line."),
+  suggestion: z
+    .string()
+    .nullable()
+    .describe(
+      "A value to prefill when there is a likely answer, e.g. the user's own address. Null when there is nothing sensible to offer.",
+    ),
+});
+
 const planSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -71,6 +94,11 @@ const planSchema = z.object({
     .nullable()
     .describe("IANA zone, e.g. Asia/Kolkata. Null unless SCHEDULE."),
   steps: z.array(stepSchema),
+  questions: z
+    .array(questionSchema)
+    .describe(
+      "Values only the user can supply. Non-empty means the draft is not ready: leave steps empty and ask. Empty when everything needed is known.",
+    ),
   problem: z
     .string()
     .nullable()
@@ -102,9 +130,28 @@ export type WorkflowDraft = {
   }[];
 };
 
+export type WorkflowQuestion = z.infer<typeof questionSchema>;
+
+/**
+ * Either the model has enough to build, or it needs the user to fill something
+ * in. A union rather than a draft with an optional questions field, so a caller
+ * cannot accidentally save a draft that was never really finished.
+ */
+export type GenerationResult =
+  | { kind: "draft"; draft: WorkflowDraft }
+  | { kind: "questions"; questions: WorkflowQuestion[] };
+
+/** One turn of the builder conversation, as sent by the client. */
+export type BuilderMessage = { role: "user" | "assistant"; content: string };
+
 export class GenerationError extends Error {}
 
-function systemPrompt(tools: AvailableTool[], timezone: string, now: Date) {
+function systemPrompt(
+  tools: AvailableTool[],
+  timezone: string,
+  now: Date,
+  identity: Identity,
+) {
   return `You turn a user's request into an automation workflow.
 
 AVAILABLE TOOLS — you may only use these. Copy slugs exactly.
@@ -113,6 +160,9 @@ ${renderToolsForPrompt(tools)}
 CONTEXT
 - The user's timezone is ${timezone}.
 - The current time there is ${now.toLocaleString("en-US", { timeZone: timezone })}.
+- The user's own email address is ${identity.email}. "me", "myself" and "my
+  inbox" mean this address. Use it directly rather than asking.
+${renderAccountsForPrompt(identity.accounts)}
 
 RULES
 1. Never invent a serverSlug or toolSlug. If the request needs an integration
@@ -135,7 +185,36 @@ RULES
 6. Use only the argument names listed under "args" for each tool, spelled
    exactly as shown. Do not invent argument names and do not rewrite them
    into prose — "max_results", never "max results".
-7. "name" is a short label, under 60 characters.`;
+7. "name" is a short label, under 60 characters.
+8. Never invent a value only the user can know. Recipient addresses, label
+   and folder names, spreadsheet or document names, search terms that change
+   the meaning of a step, and a choice between several connected accounts all
+   fall under this. When the request does not state one and CONTEXT does not
+   give it to you, put it in "questions", leave "steps" empty, and ask for
+   everything you are missing in a single batch.
+9. A placeholder is not an answer. Writing "me", "user@example.com",
+   "recipient", "TODO" or an empty string into an argument the user has to
+   choose is the failure this rule exists to prevent — that workflow saves
+   cleanly and then sends real mail to the wrong place. Ask instead.
+10. Do not ask about things you can reasonably default, because a needless
+   question is worse than a good guess: vague hours (rule 5), result limits,
+   verbosity flags, and anything already settled in CONTEXT or earlier in the
+   conversation. If the user has answered a question, do not ask it again.`;
+}
+
+/** Who the workflow is being built for, so the model need not ask the obvious. */
+export type Identity = {
+  email: string;
+  accounts: { serverSlug: string; serverName: string; label: string | null }[];
+};
+
+function renderAccountsForPrompt(accounts: Identity["accounts"]): string {
+  if (accounts.length === 0) return "";
+  const lines = accounts.map((account) => {
+    const who = account.label ? ` connected as ${account.label}` : "";
+    return `  - ${account.serverName} (${account.serverSlug})${who}`;
+  });
+  return `- Connected accounts:\n${lines.join("\n")}`;
 }
 
 /** Assembles a linear graph from the model's plan. */
@@ -224,11 +303,12 @@ function planToGraph(
 }
 
 export async function generateWorkflowDraft(input: {
-  prompt: string;
+  messages: BuilderMessage[];
   tools: AvailableTool[];
   timezone: string;
+  identity: Identity;
   now?: Date;
-}): Promise<WorkflowDraft> {
+}): Promise<GenerationResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new GenerationError("OPENAI_API_KEY is not set.");
@@ -238,6 +318,9 @@ export async function generateWorkflowDraft(input: {
       "Connect an MCP server first — there are no tools to build a workflow from.",
     );
   }
+  if (input.messages.length === 0) {
+    throw new GenerationError("Describe what you want to automate.");
+  }
 
   const now = input.now ?? new Date();
   const client = new OpenAI({ apiKey });
@@ -245,8 +328,11 @@ export async function generateWorkflowDraft(input: {
   const response = await client.responses.parse({
     model: MODEL,
     input: [
-      { role: "system", content: systemPrompt(input.tools, input.timezone, now) },
-      { role: "user", content: input.prompt },
+      {
+        role: "system",
+        content: systemPrompt(input.tools, input.timezone, now, input.identity),
+      },
+      ...input.messages,
     ],
     text: { format: zodTextFormat(planSchema, "workflow_plan") },
   });
@@ -258,6 +344,14 @@ export async function generateWorkflowDraft(input: {
   if (plan.problem) {
     throw new GenerationError(plan.problem);
   }
+
+  // Checked before the empty-steps guard: an unanswered question is the
+  // reason there are no steps, and reporting it as a failure would throw away
+  // the question the model just asked.
+  if (plan.questions.length > 0) {
+    return { kind: "questions", questions: plan.questions.slice(0, 6) };
+  }
+
   if (plan.steps.length === 0) {
     throw new GenerationError(
       "The model produced a workflow with no steps. Try describing the task more concretely.",
@@ -299,20 +393,23 @@ export async function generateWorkflowDraft(input: {
   const assembled = planToGraph(plan, input.tools);
 
   return {
-    name: plan.name.slice(0, 60),
-    description: plan.description,
-    graph: assembled.graph,
-    droppedArgs: assembled.droppedArgs,
-    trigger: plan.trigger,
-    cron,
-    timezone,
-    scheduleLabel,
-    steps: plan.steps.map((step) => ({
-      kind: step.kind,
-      serverSlug: step.serverSlug,
-      toolSlug: step.toolSlug,
-      purpose: step.purpose,
-    })),
+    kind: "draft",
+    draft: {
+      name: plan.name.slice(0, 60),
+      description: plan.description,
+      graph: assembled.graph,
+      droppedArgs: assembled.droppedArgs,
+      trigger: plan.trigger,
+      cron,
+      timezone,
+      scheduleLabel,
+      steps: plan.steps.map((step) => ({
+        kind: step.kind,
+        serverSlug: step.serverSlug,
+        toolSlug: step.toolSlug,
+        purpose: step.purpose,
+      })),
+    },
   };
 }
 

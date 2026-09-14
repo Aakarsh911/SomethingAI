@@ -90,6 +90,31 @@ async function fetchToolkitTools(
  * not connected Gmail produces a workflow that cannot run, and the failure
  * shows up at execution rather than at generation time.
  */
+/**
+ * The connected accounts the builder can name in a question.
+ *
+ * Separate from availableToolsForUser because it answers a different
+ * question: not "what can be called" but "whose account would it be called
+ * against", which is what the user has to disambiguate.
+ */
+export async function connectedAccountsForUser(userId: string) {
+  const connections = await prisma.userMcpConnection.findMany({
+    where: { userId, status: "CONNECTED" },
+    select: {
+      accountLabel: true,
+      server: { select: { slug: true, name: true, isEnabled: true } },
+    },
+  });
+
+  return connections
+    .filter((connection) => connection.server.isEnabled)
+    .map((connection) => ({
+      serverSlug: connection.server.slug,
+      serverName: connection.server.name,
+      label: connection.accountLabel,
+    }));
+}
+
 export async function availableToolsForUser(
   userId: string,
 ): Promise<AvailableTool[]> {
