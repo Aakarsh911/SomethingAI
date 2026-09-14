@@ -7,9 +7,11 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 // response for a JSON endpoint and indistinguishable from a genuine missing
 // route. Each handler instead resolves the session itself and returns a JSON
 // 401, or for the browser-navigated connect routes, a redirect to /sign-in.
+const PROTECTED_PREFIXES = ["/settings", "/workflows"];
+
 export default clerkMiddleware(async (auth, request) => {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/settings") || pathname.startsWith("/workflows")) {
+  if (PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     await auth.protect({
       unauthenticatedUrl: new URL("/sign-in", request.url).toString(),
     });

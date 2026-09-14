@@ -50,3 +50,8 @@ next-env.d.ts
 .agents/
 .windsurf/
 skills-lock.json
+
+# Generated and re-created by `next dev` on every run (see
+# node_modules/next/dist/server/lib/generate-agent-files.js).
+AGENTS.md
+CLAUDE.md

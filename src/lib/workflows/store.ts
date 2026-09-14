@@ -7,6 +7,7 @@ import {
   parseGraph,
   type WorkflowGraph,
 } from "@/lib/workflows/graph";
+import { ScheduleError, nextRunAt } from "@/lib/workflows/schedule";
 
 /**
  * Persistence for workflows and their run history.
@@ -35,6 +36,10 @@ const summaryFields = {
   description: true,
   trigger: true,
   isEnabled: true,
+  cron: true,
+  timezone: true,
+  nextRunAt: true,
+  lastRunAt: true,
   serverSlugs: true,
   graphVersion: true,
   createdAt: true,
@@ -64,8 +69,46 @@ export type WorkflowInput = {
   graph: WorkflowGraph;
   trigger?: WorkflowTrigger;
   isEnabled?: boolean;
+  /** Required when trigger is SCHEDULE, ignored otherwise. */
+  cron?: string | null;
+  /** IANA zone the cron is read in. Required alongside `cron`. */
+  timezone?: string | null;
   versionNote?: string | null;
 };
+
+type ResolvedSchedule = {
+  cron: string | null;
+  timezone: string | null;
+  nextRunAt: Date | null;
+};
+
+/**
+ * Works out the three schedule columns from a trigger and a cron.
+ *
+ * Kept in one place so the columns cannot disagree: a MANUAL workflow with a
+ * leftover `nextRunAt` would be picked up by the scheduler and run on a
+ * schedule the user thought they had removed.
+ */
+function resolveSchedule(
+  trigger: WorkflowTrigger,
+  cron: string | null | undefined,
+  timezone: string | null | undefined,
+  from: Date = new Date(),
+): ResolvedSchedule {
+  if (trigger !== "SCHEDULE") {
+    return { cron: null, timezone: null, nextRunAt: null };
+  }
+
+  if (!cron || !timezone) {
+    throw new ScheduleError(
+      "A SCHEDULE workflow needs both a cron expression and a timezone.",
+    );
+  }
+
+  // Throws on a malformed expression or an unknown zone, so an invalid
+  // schedule fails at save time rather than silently never firing.
+  return { cron, timezone, nextRunAt: nextRunAt(cron, timezone, from) };
+}
 
 export type WorkflowVersionSummary = {
   id: string;
@@ -92,6 +135,11 @@ export function getVersion(userId: string, workflowId: string, revision: number)
 }
 
 export function createWorkflow(userId: string, input: WorkflowInput) {
+  const trigger = input.trigger ?? "MANUAL";
+  // Outside the transaction on purpose: an invalid cron should fail before a
+  // transaction is opened, not roll one back.
+  const schedule = resolveSchedule(trigger, input.cron, input.timezone);
+
   return prisma.$transaction(async (tx) => {
     const workflow = await tx.workflow.create({
       data: {
@@ -103,8 +151,9 @@ export function createWorkflow(userId: string, input: WorkflowInput) {
         // Derived from the graph rather than accepted from the caller, so the
         // column cannot drift out of sync with the blob it summarises.
         serverSlugs: collectServerSlugs(input.graph),
-        trigger: input.trigger ?? "MANUAL",
+        trigger,
         isEnabled: input.isEnabled ?? false,
+        ...schedule,
       },
     });
 
@@ -131,16 +180,42 @@ export async function updateWorkflow(
   id: string,
   input: Partial<WorkflowInput>,
 ) {
+  const current = await getWorkflow(userId, id);
+  if (!current) return null;
+
   const data: Prisma.WorkflowUpdateManyMutationInput = {};
 
   if (input.name !== undefined) data.name = input.name;
   if (input.description !== undefined) data.description = input.description;
-  if (input.trigger !== undefined) data.trigger = input.trigger;
   if (input.isEnabled !== undefined) data.isEnabled = input.isEnabled;
   if (input.graph !== undefined) {
     data.graph = input.graph as unknown as Prisma.InputJsonValue;
     data.graphVersion = CURRENT_GRAPH_VERSION;
     data.serverSlugs = collectServerSlugs(input.graph);
+  }
+
+  // Computed before the transaction so an invalid cron aborts without having
+  // opened one.
+  const trigger = input.trigger ?? current.trigger;
+  const touchesSchedule =
+    input.trigger !== undefined ||
+    input.cron !== undefined ||
+    input.timezone !== undefined ||
+    // Re-enabling recomputes too: a workflow disabled for a week has a
+    // nextRunAt in the past, which would otherwise fire the moment it is
+    // switched back on.
+    (input.isEnabled === true && !current.isEnabled);
+
+  if (touchesSchedule) {
+    data.trigger = trigger;
+    Object.assign(
+      data,
+      resolveSchedule(
+        trigger,
+        input.cron !== undefined ? input.cron : current.cron,
+        input.timezone !== undefined ? input.timezone : current.timezone,
+      ),
+    );
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -194,6 +269,44 @@ export async function restoreWorkflowVersion(
   return updateWorkflow(userId, workflowId, {
     graph: parsed.data,
     versionNote: `Restored from v${revision}`,
+  });
+}
+
+/**
+ * Enabled workflows whose next run is due, oldest first.
+ *
+ * Not user-scoped — this is the scheduler's query, and it runs for everyone.
+ * It is the only function here that crosses user boundaries, which is why it
+ * takes no userId rather than taking one and ignoring it.
+ */
+export function dueWorkflows(now: Date = new Date(), take = 100) {
+  return prisma.workflow.findMany({
+    where: { isEnabled: true, nextRunAt: { lte: now } },
+    orderBy: { nextRunAt: "asc" },
+    take,
+  });
+}
+
+/**
+ * Records that a scheduled workflow just ran and advances its next due time.
+ *
+ * `nextRunAt` is computed forward from now rather than from the previous
+ * value, so a workflow that was paused, or a worker that fell behind, catches
+ * up to the next future occurrence instead of firing repeatedly to work
+ * through every slot it missed.
+ */
+export async function markScheduledRun(workflowId: string, ranAt = new Date()) {
+  const workflow = await prisma.workflow.findUnique({ where: { id: workflowId } });
+  if (!workflow) return null;
+
+  const next =
+    workflow.trigger === "SCHEDULE" && workflow.cron && workflow.timezone
+      ? nextRunAt(workflow.cron, workflow.timezone, ranAt)
+      : null;
+
+  return prisma.workflow.update({
+    where: { id: workflowId },
+    data: { lastRunAt: ranAt, nextRunAt: next },
   });
 }
 

@@ -21,8 +21,10 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@xyflow/react": "^12.11.6",
+    "cron-parser": "^5.10.0",
     "dotenv": "^17.4.2",
     "next": "16.3.4",
+    "openai": "^7.15.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.6.1"
