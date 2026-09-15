@@ -27,6 +27,18 @@ export type WorkflowDetail = WorkflowListItem & {
   graph: WorkflowGraph;
 };
 
+type ModificationQuestion = {
+  id: string;
+  question: string;
+  why: string;
+  suggestion: string | null;
+};
+
+type ModificationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 const primaryButton =
   "h-8 cursor-pointer rounded-full border border-transparent bg-black px-3 text-sm font-medium text-neutral-50 transition-all duration-200 hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
 
@@ -57,12 +69,24 @@ function StudioInner({
 }) {
   const router = useRouter();
   const [nameDraft, setNameDraft] = useState("");
+  const [displayName, setDisplayName] = useState(selected?.name ?? "");
   const [graph, setGraph] = useState<WorkflowGraph | null>(selected?.graph ?? null);
   const [localVersions, setLocalVersions] = useState(versions);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<WorkflowListItem | null>(null);
   const [canvasKey, setCanvasKey] = useState(0);
+  const [modification, setModification] = useState("");
+  const [modificationMessages, setModificationMessages] = useState<
+    ModificationMessage[]
+  >([]);
+  const [modificationQuestions, setModificationQuestions] = useState<
+    ModificationQuestion[]
+  >([]);
+  const [modifying, setModifying] = useState(false);
+  const [modificationFeedback, setModificationFeedback] = useState<string | null>(
+    null,
+  );
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
 
@@ -98,10 +122,10 @@ function StudioInner({
     router.refresh();
   }
 
-  async function persistGraph(next: WorkflowGraph) {
-    if (!selected) return;
+  async function persistGraph(next: WorkflowGraph): Promise<boolean> {
+    if (!selected) return false;
     const serialized = stableStringify(next);
-    if (serialized === lastSaved.current) return;
+    if (serialized === lastSaved.current) return true;
 
     setSaveState("saving");
     const response = await fetch(`/api/workflows/${selected.id}`, {
@@ -118,13 +142,14 @@ function StudioInner({
     if (!response.ok || !body?.workflow) {
       setSaveState("error");
       setError(body?.error ?? "Could not save the workflow.");
-      return;
+      return false;
     }
 
     lastSaved.current = stableStringify(body.workflow.graph);
     if (body.versions) setLocalVersions(body.versions);
     setSaveState("saved");
     router.refresh();
+    return true;
   }
 
   function queueSave(next: WorkflowGraph) {
@@ -160,6 +185,96 @@ function StudioInner({
     if (body.versions) setLocalVersions(body.versions);
     setSaveState("saved");
     router.refresh();
+  }
+
+  async function modifyWorkflow(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || !graph || modifying) return;
+
+    const instruction = modification.trim();
+    if (!instruction) return;
+
+    setModifying(true);
+
+    // The model must edit the same graph the user can see. Flush a pending
+    // drag/add/delete before the server loads the workflow as its baseline.
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const saved = await persistGraph(graph);
+    if (!saved) {
+      setModifying(false);
+      return;
+    }
+
+    const messages: ModificationMessage[] = [
+      ...modificationMessages,
+      { role: "user", content: instruction },
+    ];
+    setModification("");
+    setModificationQuestions([]);
+    setModificationFeedback(null);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/workflows/${selected.id}/modify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        workflow?: {
+          name: string;
+          graph: WorkflowGraph;
+        };
+        versions?: WorkflowVersionItem[];
+        questions?: ModificationQuestion[];
+        droppedArgs?: string[];
+        error?: string;
+      } | null;
+
+      if (response.ok && body?.questions?.length) {
+        const assistantMessage = body.questions
+          .map((question) => `- (${question.id}) ${question.question}`)
+          .join("\n");
+        setModificationMessages([
+          ...messages,
+          { role: "assistant", content: assistantMessage },
+        ]);
+        setModificationQuestions(body.questions);
+        return;
+      }
+
+      if (!response.ok || !body?.workflow) {
+        setError(body?.error ?? "Could not change the workflow.");
+        setModificationMessages(messages);
+        return;
+      }
+
+      setGraph(body.workflow.graph);
+      setCanvasKey((value) => value + 1);
+      setDisplayName(body.workflow.name);
+      lastSaved.current = stableStringify(body.workflow.graph);
+      if (body.versions) setLocalVersions(body.versions);
+      setModificationMessages([]);
+      setModificationQuestions([]);
+      setSaveState("saved");
+      setModificationFeedback(
+        body.droppedArgs?.length
+          ? `Workflow changed. Ignored unsupported arguments: ${body.droppedArgs.join(", ")}`
+          : "Workflow changed and saved as a new graph version.",
+      );
+      router.refresh();
+    } catch {
+      setError("Could not reach the server.");
+      setModificationMessages(messages);
+    } finally {
+      setModifying(false);
+    }
   }
 
   async function confirmDelete() {
@@ -255,7 +370,7 @@ function StudioInner({
           <>
             <header className="flex items-center justify-between gap-3 border-b border-[#ebebeb] px-4 py-3 dark:border-[#1a1a1a]">
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold">{selected.name}</h1>
+                <h1 className="truncate text-sm font-semibold">{displayName}</h1>
                 <p className="text-xs text-[#666] dark:text-[#999]">
                   {saveState === "saving"
                     ? "Saving…"
@@ -297,7 +412,7 @@ function StudioInner({
               </p>
             ) : null}
 
-            <div className="min-h-0 flex-1">
+            <div className="relative min-h-0 flex-1">
               <ReactFlowProvider>
                 <WorkflowCanvas
                   key={canvasKey}
@@ -306,6 +421,64 @@ function StudioInner({
                   onChange={queueSave}
                 />
               </ReactFlowProvider>
+              {modifying ? (
+                <div
+                  className="absolute inset-0 z-40 cursor-wait"
+                  aria-label="Changing workflow"
+                />
+              ) : null}
+            </div>
+
+            <div className="shrink-0 border-t border-[#ebebeb] bg-white px-4 py-3 dark:border-[#1a1a1a] dark:bg-neutral-950">
+              {modificationQuestions.length > 0 ? (
+                <div className="mb-3 rounded-lg bg-[#f5f5f5] px-3 py-2 dark:bg-[#1a1a1a]">
+                  <p className="mb-1 text-xs font-medium text-black dark:text-[#ededed]">
+                    I need one detail before changing it:
+                  </p>
+                  {modificationQuestions.map((question) => (
+                    <p
+                      key={question.id}
+                      className="text-xs text-[#666] dark:text-[#999]"
+                    >
+                      {question.question}
+                      {question.suggestion
+                        ? ` (Suggested: ${question.suggestion})`
+                        : ""}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+
+              {modificationFeedback ? (
+                <p className="mb-2 text-xs text-[#666] dark:text-[#999]">
+                  {modificationFeedback}
+                </p>
+              ) : null}
+
+              <form
+                className="mx-auto flex max-w-3xl items-center gap-2"
+                onSubmit={modifyWorkflow}
+              >
+                <input
+                  value={modification}
+                  onChange={(event) => setModification(event.target.value)}
+                  disabled={modifying}
+                  aria-label="Describe a workflow change"
+                  placeholder={
+                    modificationQuestions.length > 0
+                      ? "Answer here…"
+                      : "Describe a change, e.g. “add a step that summarizes the emails”…"
+                  }
+                  className="h-10 min-w-0 flex-1 rounded-xl border border-[#ebebeb] bg-transparent px-3 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
+                />
+                <button
+                  type="submit"
+                  className={primaryButton}
+                  disabled={modifying || !modification.trim()}
+                >
+                  {modifying ? "Changing…" : "Change"}
+                </button>
+              </form>
             </div>
           </>
         ) : (
