@@ -35,6 +35,12 @@ const MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
  * the same reason — strict mode has no way to express an arbitrary object.
  */
 const stepSchema = z.object({
+  nodeId: z
+    .string()
+    .nullable()
+    .describe(
+      "In EDIT MODE, copy the exact current node id for a kept or changed step. Use null for a new step. Always null in CREATE MODE.",
+    ),
   kind: z
     .enum(["tool", "llm"])
     .describe('"tool" calls an MCP tool; "llm" transforms the previous step with a model.'),
@@ -146,13 +152,41 @@ export type BuilderMessage = { role: "user" | "assistant"; content: string };
 
 export class GenerationError extends Error {}
 
+export type ExistingWorkflowContext = {
+  name: string;
+  description: string | null;
+  graph: WorkflowGraph;
+  trigger: "MANUAL" | "SCHEDULE";
+  cron: string | null;
+  timezone: string | null;
+};
+
 function systemPrompt(
   tools: AvailableTool[],
   timezone: string,
   now: Date,
   identity: Identity,
+  existing?: ExistingWorkflowContext,
 ) {
+  const mode = existing
+    ? `EDIT MODE
+The user is editing the workflow below. Apply their latest request as a
+targeted change and return the COMPLETE revised workflow, including everything
+that should remain unchanged. Do not remove, rename, reschedule, or reinterpret
+parts they did not ask to change.
+
+CURRENT WORKFLOW
+${JSON.stringify(existing, null, 2)}
+
+The current graph is linear. Preserve its order unless the user asks to reorder
+it. A request such as "add a final summary step" means keep all current steps
+and append that step; it does not mean build a new workflow from scratch.`
+    : `CREATE MODE
+Build a complete new workflow from the conversation.`;
+
   return `You turn a user's request into an automation workflow.
+
+${mode}
 
 AVAILABLE TOOLS — you may only use these. Copy slugs exactly.
 ${renderToolsForPrompt(tools)}
@@ -199,7 +233,13 @@ RULES
 10. Do not ask about things you can reasonably default, because a needless
    question is worse than a good guess: vague hours (rule 5), result limits,
    verbosity flags, and anything already settled in CONTEXT or earlier in the
-   conversation. If the user has answered a question, do not ask it again.`;
+   conversation. If the user has answered a question, do not ask it again.
+11. In EDIT MODE, keep existing concrete argument values unless the user asks
+   to change them. Treat the current workflow as authoritative context, not as
+   another user request to simplify.
+12. In EDIT MODE, copy each kept or changed step's exact current id into
+   "nodeId"; use null only for a newly added step. Never use the trigger id and
+   never invent an id. In CREATE MODE, every "nodeId" must be null.`;
 }
 
 /** Who the workflow is being built for, so the model need not ask the obvious. */
@@ -221,6 +261,7 @@ function renderAccountsForPrompt(accounts: Identity["accounts"]): string {
 function planToGraph(
   plan: z.infer<typeof planSchema>,
   tools: AvailableTool[],
+  existing?: WorkflowGraph,
 ): { graph: WorkflowGraph; droppedArgs: string[] } {
   const byKey = new Map(
     tools.map((tool) => [`${tool.serverSlug}:${tool.toolSlug}`, tool]),
@@ -234,22 +275,101 @@ function planToGraph(
   const COLUMN_GAP = 260;
   const at = (index: number) => ({ x: COLUMN_X + index * COLUMN_GAP, y: LANE_Y });
 
+  const oldTrigger = existing?.nodes.find((node) => node.kind === "trigger");
+  const triggerId = oldTrigger?.id ?? "trigger";
   const nodes: unknown[] = [
-    { id: "trigger", kind: "trigger", label: "Start", position: at(0), config: {} },
+    oldTrigger
+      ? { ...oldTrigger }
+      : { id: triggerId, kind: "trigger", label: "Start", position: at(0), config: {} },
   ];
   const edges: unknown[] = [];
+  const existingSteps =
+    existing?.nodes.filter((node) => node.kind === "tool" || node.kind === "llm") ?? [];
+  const claimed = new Set<string>();
+  const reservedIds = new Set(existing?.nodes.map((node) => node.id) ?? [triggerId]);
+  const matches = new Map<number, (typeof existingSteps)[number]>();
+  const existingById = new Map(existingSteps.map((node) => [node.id, node]));
 
-  let previous = "trigger";
+  // Explicit ids are the strongest signal and make duplicate tool calls or
+  // reordered steps unambiguous. Validate them before using any fallback.
   plan.steps.forEach((step, index) => {
-    const id = `step-${index + 1}`;
+    if (!step.nodeId) return;
+    const node = existingById.get(step.nodeId);
+    if (!node) {
+      throw new GenerationError(
+        `The model referenced an unknown existing node "${step.nodeId}".`,
+      );
+    }
+    if (claimed.has(node.id)) {
+      throw new GenerationError(
+        `The model reused existing node "${step.nodeId}" more than once.`,
+      );
+    }
+    claimed.add(node.id);
+    matches.set(index, node);
+  });
+
+  // Claim semantic matches for the whole plan before falling back to matching
+  // by position. Otherwise inserting a Gmail step at the start could steal the
+  // id of the old first Gmail step before that unchanged step is considered.
+  plan.steps.forEach((step, index) => {
+    if (matches.has(index)) return;
+    const exact = existingSteps.find((node) => {
+      if (claimed.has(node.id) || node.kind !== step.kind) return false;
+      return node.kind === "tool"
+        ? node.serverSlug === step.serverSlug && node.toolSlug === step.toolSlug
+        : node.instruction.trim() === (step.instruction ?? step.purpose).trim();
+    });
+    if (exact) {
+      claimed.add(exact.id);
+      matches.set(index, exact);
+    }
+  });
+
+  plan.steps.forEach((step, index) => {
+    if (matches.has(index)) return;
+    const sameSlot = existingSteps[index];
+    if (sameSlot && !claimed.has(sameSlot.id) && sameSlot.kind === step.kind) {
+      claimed.add(sameSlot.id);
+      matches.set(index, sameSlot);
+    }
+  });
+
+  const freshId = (index: number) => {
+    const base = `step-${index + 1}`;
+    let candidate = base;
+    let suffix = 2;
+    while (reservedIds.has(candidate)) candidate = `${base}-${suffix++}`;
+    reservedIds.add(candidate);
+    return candidate;
+  };
+  const usedPositions = new Set(
+    [oldTrigger, ...matches.values()]
+      .filter((node): node is NonNullable<typeof node> => Boolean(node))
+      .map((node) => `${node.position.x}:${node.position.y}`),
+  );
+  const freshPosition = (index: number) => {
+    const candidate = at(index + 1);
+    while (usedPositions.has(`${candidate.x}:${candidate.y}`)) {
+      candidate.y += 160;
+    }
+    usedPositions.add(`${candidate.x}:${candidate.y}`);
+    return candidate;
+  };
+
+  let previous = triggerId;
+  plan.steps.forEach((step, index) => {
+    const oldNode = matches.get(index);
+    const id = oldNode?.id ?? freshId(index);
     const label = step.purpose.slice(0, 200);
+    const position = oldNode?.position ?? freshPosition(index);
 
     if (step.kind === "llm") {
       nodes.push({
         id,
         kind: "llm",
         label,
-        position: at(index + 1),
+        position,
         instruction: step.instruction ?? step.purpose,
       });
     } else {
@@ -280,7 +400,7 @@ function planToGraph(
         id,
         kind: "tool",
         label,
-        position: at(index + 1),
+        position,
         serverSlug: step.serverSlug,
         toolSlug: step.toolSlug,
         inputs,
@@ -307,13 +427,14 @@ export async function generateWorkflowDraft(input: {
   tools: AvailableTool[];
   timezone: string;
   identity: Identity;
+  existing?: ExistingWorkflowContext;
   now?: Date;
 }): Promise<GenerationResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new GenerationError("OPENAI_API_KEY is not set.");
   }
-  if (input.tools.length === 0) {
+  if (input.tools.length === 0 && !input.existing) {
     throw new GenerationError(
       "Connect an MCP server first — there are no tools to build a workflow from.",
     );
@@ -330,7 +451,13 @@ export async function generateWorkflowDraft(input: {
     input: [
       {
         role: "system",
-        content: systemPrompt(input.tools, input.timezone, now, input.identity),
+        content: systemPrompt(
+          input.tools,
+          input.timezone,
+          now,
+          input.identity,
+          input.existing,
+        ),
       },
       ...input.messages,
     ],
@@ -352,7 +479,7 @@ export async function generateWorkflowDraft(input: {
     return { kind: "questions", questions: plan.questions.slice(0, 6) };
   }
 
-  if (plan.steps.length === 0) {
+  if (plan.steps.length === 0 && !input.existing) {
     throw new GenerationError(
       "The model produced a workflow with no steps. Try describing the task more concretely.",
     );
@@ -390,7 +517,7 @@ export async function generateWorkflowDraft(input: {
     scheduleLabel = describeSchedule(cron, timezone);
   }
 
-  const assembled = planToGraph(plan, input.tools);
+  const assembled = planToGraph(plan, input.tools, input.existing?.graph);
 
   return {
     kind: "draft",
