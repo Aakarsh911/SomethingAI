@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -63,9 +63,12 @@ export function WorkflowCanvas({
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const graphRef = useRef(graph);
-  nodesRef.current = nodes;
-  edgesRef.current = edges;
-  graphRef.current = graph;
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+    graphRef.current = graph;
+  }, [edges, graph, nodes]);
 
   const emit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
