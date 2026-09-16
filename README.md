@@ -119,8 +119,9 @@ cp .env.example .env   # then edit the credentials to match step 3
 
 ```bash
 npm install            # `postinstall` runs `prisma generate`
-npm run db:migrate     # create the tables
-npm run db:seed        # populate the MCP catalog (Gmail, ...)
+npm run db:migrate         # create the tables
+npm run db:sync-composio   # import Composio's ~1500 integrations
+npm run db:seed            # apply the curated overrides in catalog.ts
 ```
 
 ### Verifying the connection
@@ -140,7 +141,8 @@ from a wrong host or a missing database.
 | --- | --- |
 | `npm run db:migrate` | Create and apply a migration (development) |
 | `npm run db:deploy` | Apply existing migrations (production/CI) |
-| `npm run db:seed` | Sync the MCP catalog from `src/lib/mcp/catalog.ts` |
+| `npm run db:seed` | Apply the curated overrides in `src/lib/mcp/catalog.ts` |
+| `npm run db:sync-composio` | Import Composio's toolkit directory into the catalog |
 | `npm run db:generate` | Regenerate the Prisma client |
 | `npm run db:studio` | Browse data in a GUI at `localhost:5555` |
 | `npm run typecheck` | Type-check without emitting |
@@ -191,9 +193,25 @@ prisma generate && prisma migrate deploy && next build
 Users connect [Model Context Protocol](https://modelcontextprotocol.io) servers
 at `/settings/integrations`. Two kinds of server live in the `McpServer` table:
 
-- **Catalog entries** (`ownerId IS NULL`) — curated, visible to everyone, and
-  defined in [`src/lib/mcp/catalog.ts`](src/lib/mcp/catalog.ts). Edit that file
-  and run `npm run db:seed` to add or update one. Gmail ships by default.
+- **Catalog entries** (`ownerId IS NULL`) — visible to everyone. Nearly all of
+  them are imported from Composio's toolkit directory by
+  `npm run db:sync-composio`, which mirrors ~1500 integrations into the table
+  and disables any that Composio has since dropped. Re-run it whenever you want
+  a fresh list; it is idempotent.
+
+  [`src/lib/mcp/catalog.ts`](src/lib/mcp/catalog.ts) is the override layer on
+  top: entries there win over whatever Composio supplies, which is how Gmail
+  gets a hand-written description rather than the generic one. Run
+  `npm run db:seed` *after* the sync, or the sync will overwrite the overrides.
+
+  How a catalog entry is connected depends on its auth scheme, pinned at sync
+  time in `composioAuthScheme`:
+
+  | | Count | Connecting |
+  | --- | --- | --- |
+  | Composio-managed OAuth, and dynamic-registration OAuth | ~208 | Redirect to the provider's consent screen |
+  | API key, bearer token, basic auth, no auth | ~1280 | Inline form, fields described by Composio |
+  | OAuth that Composio does not manage | ~55 | Not connectable until an auth config id is supplied (see below) |
 - **Custom servers** (`ownerId` set) — added by a user through the UI, visible
   only to them. These support no auth or an API key. The hosted flow is
   catalog-only, because it is tied to a Composio toolkit rather than to an

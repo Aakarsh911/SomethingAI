@@ -1,5 +1,7 @@
-import { AuthConfigTypes, Composio } from "@composio/core";
+import { AuthConfigTypes, AuthScheme, Composio } from "@composio/core";
+import type { AuthSchemeType } from "@composio/core";
 import { prisma } from "@/lib/db";
+import { REDIRECT_SCHEMES } from "@/lib/mcp/composio-toolkits";
 import type { McpServerModel } from "@/generated/prisma/models";
 
 /**
@@ -31,6 +33,21 @@ function client(): Composio {
 }
 
 /**
+ * The scheme a server is connected with, as pinned at sync time.
+ *
+ * Defaults to OAUTH2 so rows written before the scheme column existed keep
+ * the behaviour they had, which was Composio-managed OAuth or nothing.
+ */
+function schemeOf(server: McpServerModel): AuthSchemeType {
+  return (server.composioAuthScheme ?? "OAUTH2") as AuthSchemeType;
+}
+
+/** True when connecting is a browser round trip rather than a form. */
+export function usesRedirect(server: McpServerModel): boolean {
+  return REDIRECT_SCHEMES.has(schemeOf(server));
+}
+
+/**
  * Resolves the Composio auth config for a toolkit, creating one the first time
  * anybody connects it and caching the id on the server row.
  *
@@ -47,7 +64,8 @@ export async function ensureAuthConfig(server: McpServerModel): Promise<string> 
 
   // Escape hatch for bringing your own OAuth credentials: point a toolkit at
   // an auth config you built in the Composio dashboard, e.g.
-  // COMPOSIO_GMAIL_AUTH_CONFIG_ID.
+  // COMPOSIO_GMAIL_AUTH_CONFIG_ID. This is the only way to connect a toolkit
+  // whose OAuth application Composio does not manage.
   const override =
     process.env[`COMPOSIO_${toolkit.toUpperCase()}_AUTH_CONFIG_ID`];
   if (override) {
@@ -59,22 +77,21 @@ export async function ensureAuthConfig(server: McpServerModel): Promise<string> 
   }
 
   const composio = client();
+  const scheme = schemeOf(server);
 
-  // Reuse an existing config for this toolkit if the dashboard already has
-  // one, so we do not pile up duplicates across restarts or environments.
+  // Reuse an existing config if the dashboard already has one, so we do not
+  // pile up duplicates across restarts or environments. Matched on scheme as
+  // well as toolkit: most toolkits offer several, and a config built for
+  // OAuth2 cannot accept the API key we would go on to submit against it.
   const existing = await composio.authConfigs
     .list({ toolkit })
     .catch(() => null);
 
-  const found = existing?.items?.[0]?.id;
-  const authConfigId =
-    found ??
-    (
-      await composio.authConfigs.create(toolkit, {
-        type: AuthConfigTypes.COMPOSIO_MANAGED,
-        name: `somethingai-${toolkit}`,
-      })
-    ).id;
+  const found = existing?.items?.find(
+    (item) => (item.authScheme ?? "OAUTH2") === scheme,
+  )?.id;
+
+  const authConfigId = found ?? (await createAuthConfig(toolkit, scheme));
 
   await prisma.mcpServer.update({
     where: { id: server.id },
@@ -82,6 +99,167 @@ export async function ensureAuthConfig(server: McpServerModel): Promise<string> 
   });
 
   return authConfigId;
+}
+
+/**
+ * Builds the auth config, managed where Composio offers it and custom
+ * otherwise.
+ *
+ * "Custom" here does not mean we supply credentials — for API keys, basic
+ * auth and bearer tokens the config carries none, and the secret arrives
+ * per-user at connect time. It only means Composio is not providing an OAuth
+ * application of its own.
+ */
+async function createAuthConfig(
+  toolkit: string,
+  scheme: AuthSchemeType,
+): Promise<string> {
+  const composio = client();
+
+  const isManaged = await composio.toolkits
+    .get(toolkit)
+    .then((details) =>
+      Boolean(details.composioManagedAuthSchemes?.includes(scheme)),
+    )
+    .catch(() => false);
+
+  if (isManaged) {
+    const config = await composio.authConfigs.create(toolkit, {
+      type: AuthConfigTypes.COMPOSIO_MANAGED,
+      name: `somethingai-${toolkit}`,
+    });
+    return config.id;
+  }
+
+  try {
+    const config = await composio.authConfigs.create(toolkit, {
+      type: AuthConfigTypes.CUSTOM,
+      authScheme: scheme,
+      credentials: {},
+      name: `somethingai-${toolkit}`,
+    });
+    return config.id;
+  } catch (error) {
+    // The common cause is an OAuth scheme Composio does not manage, which
+    // needs a client id and secret this app has no way to obtain. Say so,
+    // because the raw upstream error names neither the toolkit nor the fix.
+    throw new Error(
+      `${toolkit} needs an OAuth application that Composio does not provide. ` +
+        `Create an auth config for it in the Composio dashboard and set ` +
+        `COMPOSIO_${toolkit.toUpperCase()}_AUTH_CONFIG_ID. ` +
+        `(${error instanceof Error ? error.message : String(error)})`,
+    );
+  }
+}
+
+export type ConnectField = {
+  name: string;
+  displayName: string;
+  description: string | null;
+  required: boolean;
+  /** True for values that must never be echoed back to the browser. */
+  secret: boolean;
+};
+
+/**
+ * The credentials the user has to supply to connect this server, straight
+ * from Composio's description of the toolkit.
+ *
+ * Asked upstream rather than guessed from the scheme, because "API key" is
+ * not one field everywhere: Perplexity wants a key, Shopify wants a key and
+ * the store subdomain, Mixpanel wants a username, a password and a region.
+ */
+export async function listConnectFields(
+  server: McpServerModel,
+): Promise<ConnectField[]> {
+  const toolkit = server.composioToolkit;
+  if (!toolkit) return [];
+
+  const fields = await client()
+    .toolkits.getConnectedAccountInitiationFields(toolkit, schemeOf(server))
+    .catch(() => []);
+
+  return fields.map((field) => ({
+    name: field.name,
+    displayName: field.displayName || field.name,
+    description: field.description || null,
+    // Composio leaves this off for some fields; treating an unstated field as
+    // optional is the safe way round, since the worst case is Composio
+    // rejecting the submission rather than us blocking a valid one.
+    required: field.required ?? false,
+    // Composio does not flag secrecy, so infer it from the name. Erring
+    // towards masking costs a user nothing; erring the other way puts an API
+    // key in a plain text input and, worse, in the browser's autofill store.
+    secret: /key|secret|token|password|credential/i.test(field.name),
+  }));
+}
+
+/**
+ * Connects a user by submitting credentials directly, for the toolkits that
+ * have no consent screen to redirect to.
+ *
+ * Unlike the redirect flow there is no callback to verify against, so the
+ * connected account is read back from Composio before it is trusted — the
+ * same reason the callback route does it.
+ */
+export async function connectWithCredentials(options: {
+  server: McpServerModel;
+  userId: string;
+  values: Record<string, string>;
+}): Promise<{ connectedAccountId: string; isActive: boolean }> {
+  const authConfigId = await ensureAuthConfig(options.server);
+  const scheme = schemeOf(options.server);
+
+  const request = await client().connectedAccounts.initiate(
+    options.userId,
+    authConfigId,
+    { config: connectionData(scheme, options.values) },
+  );
+
+  if (!request.id) {
+    throw new Error("Composio did not return a connected account.");
+  }
+
+  return {
+    connectedAccountId: request.id,
+    // INITIALIZING/INITIATED means Composio is still validating; the caller
+    // stores the account as pending rather than claiming success.
+    isActive: request.status === "ACTIVE",
+  };
+}
+
+/**
+ * Wraps the user's values in the envelope Composio expects for the scheme.
+ *
+ * The cast is unavoidable: each `AuthScheme` helper is typed against the
+ * exact fields of its own scheme, while the values here are whatever
+ * listConnectFields() asked for at runtime. Composio validates them against
+ * the same field list on receipt, so the check happens — just not in the type
+ * system.
+ */
+function connectionData(scheme: AuthSchemeType, values: Record<string, string>) {
+  const params = values as never;
+
+  switch (scheme) {
+    case "API_KEY":
+      return AuthScheme.APIKey(params);
+    case "BEARER_TOKEN":
+      return AuthScheme.BearerToken(params);
+    case "BASIC":
+      return AuthScheme.Basic(params);
+    case "BASIC_WITH_JWT":
+      return AuthScheme.BasicWithJWT(params);
+    case "BILLCOM_AUTH":
+      return AuthScheme.BillcomAuth(params);
+    case "CALCOM_AUTH":
+      return AuthScheme.CalcomAuth(params);
+    case "GOOGLE_SERVICE_ACCOUNT":
+      return AuthScheme.GoogleServiceAccount(params);
+    case "NO_AUTH":
+      return AuthScheme.NoAuth(params);
+    default:
+      throw new Error(`${scheme} cannot be connected by submitting a form.`);
+  }
 }
 
 /**

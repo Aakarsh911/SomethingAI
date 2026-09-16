@@ -8,7 +8,7 @@ export async function GET() {
   const user = await getCurrentUser();
   if (!user) return unauthorized();
 
-  const servers = await listServersForUser(user.id);
+  const servers = await listServersForUser(user.id, { connectedOnly: true });
 
   return Response.json({
     connections: servers.filter((server) => server.connection !== null),

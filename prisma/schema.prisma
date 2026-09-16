@@ -88,6 +88,41 @@ model McpServer {
   // auth config per user would fragment Composio's account management.
   composioAuthConfigId String?
 
+  // Which of the toolkit's auth schemes this app connects it with, e.g.
+  // "OAUTH2", "API_KEY", "NO_AUTH".
+  //
+  // Pinned at sync time by pickAuthScheme() in src/lib/mcp/composio-toolkits.ts
+  // rather than re-derived per request, because it decides two things that
+  // must not disagree: the shape of the auth config created upstream, and
+  // whether connecting bounces the browser to a consent screen or asks the
+  // user to type a credential. Re-deriving it after the auth config already
+  // exists would strand connections against a config of the wrong scheme.
+  composioAuthScheme String?
+
+  // Whether Composio supplies the OAuth application behind `composioAuthScheme`.
+  //
+  // This is the line between an integration a user can connect on their own
+  // and one that needs somebody to register an OAuth client with the provider
+  // first. Only ~120 of Composio's toolkits are managed, so without this the
+  // UI cannot tell which Connect buttons would fail on click.
+  composioManagedAuth Boolean @default(false)
+
+  // Composio's category slugs for this toolkit, e.g. ["crm", "productivity"].
+  //
+  // Denormalised from the toolkit API rather than kept in a join table: the
+  // catalog is ~1500 rows and the only thing categories do is narrow that
+  // list in the UI, which a GIN-indexed array answers on its own.
+  categories String[]
+
+  // Rank within the catalog, higher first. Derived from the order Composio
+  // returns when asked to sort by usage.
+  //
+  // Stored because there is no way to recover it at query time: Composio's
+  // ordering is not a property of any field we copy. Without it the catalog
+  // can only be sorted by name, and 1500 integrations alphabetised open on
+  // "1Shot API" rather than Gmail.
+  popularity Int @default(0)
+
   // Lets us retire a catalog entry without deleting rows that reference it.
   isEnabled Boolean @default(true)
 
@@ -100,6 +135,11 @@ model McpServer {
   updatedAt DateTime @updatedAt
 
   @@index([ownerId])
+  /// Serves the catalog browser, whose visible set is always enabled rows
+  /// most-used first. Without it that is a sort over the whole table on
+  /// every page load.
+  @@index([isEnabled, popularity(sort: Desc)])
+  @@index([categories], type: Gin)
 }
 
 // One user's link to one MCP server, including the credentials to call it.

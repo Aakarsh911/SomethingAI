@@ -11,6 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:sync-composio": "tsx prisma/sync-composio.ts",
     "db:studio": "prisma studio --port 5555",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate"
