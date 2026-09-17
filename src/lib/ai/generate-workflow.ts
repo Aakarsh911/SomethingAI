@@ -194,8 +194,9 @@ ${renderToolsForPrompt(tools)}
 CONTEXT
 - The user's timezone is ${timezone}.
 - The current time there is ${now.toLocaleString("en-US", { timeZone: timezone })}.
-- The user's own email address is ${identity.email}. "me", "myself" and "my
-  inbox" mean this address. Use it directly rather than asking.
+- They signed in to this app as ${identity.email}. That is an app login, NOT
+  necessarily the mailbox or account any integration acts on. Never assume a
+  tool operates on it.
 ${renderAccountsForPrompt(identity.accounts)}
 
 RULES
@@ -239,7 +240,26 @@ RULES
    another user request to simplify.
 12. In EDIT MODE, copy each kept or changed step's exact current id into
    "nodeId"; use null only for a newly added step. Never use the trigger id and
-   never invent an id. In CREATE MODE, every "nodeId" must be null.`;
+   never invent an id. In CREATE MODE, every "nodeId" must be null.
+13. An argument naming which account a tool acts on — "user_id", "userId" and
+   the like — means "the account this integration is already connected to".
+   Write "me". An email address there is read as an attempt to act on someone
+   else's mailbox and is refused.
+14. "Me" and "myself" as a RECIPIENT need a real address, and rule 13 does not
+   apply. Use the connected account's address when CONTEXT gives it. When
+   CONTEXT says that address is UNKNOWN, ask for it — the app sign-in address
+   is often a different account, so guessing it sends the mail elsewhere.
+15. Narrow the search itself; do not fetch broadly and sift afterwards. Put
+   every filter the request implies into the tool's own query — keywords,
+   senders, labels, date ranges — so the results come back already relevant.
+16. Only then keep the result limit small, 10 to 25 unless the user names a
+   number, and leave full-payload and verbose options off unless a later step
+   reads the body. Providers reject oversized responses.
+   Rules 15 and 16 go together and are dangerous apart. A small limit on a
+   broad query silently drops the very items the workflow exists to find: it
+   returns the most recent N of everything, and the match may not be in them.
+   A wide query with no limit is refused outright for being too large. Narrow
+   first, then cap.`;
 }
 
 /** Who the workflow is being built for, so the model need not ask the obvious. */
@@ -249,11 +269,15 @@ export type Identity = {
 };
 
 function renderAccountsForPrompt(accounts: Identity["accounts"]): string {
-  if (accounts.length === 0) return "";
-  const lines = accounts.map((account) => {
-    const who = account.label ? ` connected as ${account.label}` : "";
-    return `  - ${account.serverName} (${account.serverSlug})${who}`;
-  });
+  if (accounts.length === 0) return "- Nothing is connected.";
+  // Saying "unknown" out loud matters. The provider often does not tell us
+  // which mailbox an account belongs to, and the model's instinctive fallback
+  // is the app login — which is frequently a different account entirely.
+  const lines = accounts.map((account) =>
+    account.label
+      ? `  - ${account.serverName} (${account.serverSlug}) acts on ${account.label}`
+      : `  - ${account.serverName} (${account.serverSlug}) — which address it acts on is UNKNOWN`,
+  );
   return `- Connected accounts:\n${lines.join("\n")}`;
 }
 

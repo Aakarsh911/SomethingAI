@@ -27,6 +27,22 @@ export type WorkflowDetail = WorkflowListItem & {
   graph: WorkflowGraph;
 };
 
+type RunSummary = {
+  runId: string;
+  status: "SUCCEEDED" | "FAILED";
+  error: string | null;
+  output: string | null;
+  dryRun?: boolean;
+  steps: {
+    nodeId: string;
+    status: string;
+    serverSlug: string | null;
+    toolSlug: string | null;
+    error: string | null;
+    output: string | null;
+  }[];
+};
+
 type ModificationQuestion = {
   id: string;
   question: string;
@@ -87,6 +103,8 @@ function StudioInner({
   const [modificationFeedback, setModificationFeedback] = useState<string | null>(
     null,
   );
+  const [running, setRunning] = useState<false | "dry" | "live">(false);
+  const [runResult, setRunResult] = useState<RunSummary | null>(null);
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
 
@@ -277,6 +295,51 @@ function StudioInner({
     }
   }
 
+  /**
+   * Runs the workflow and waits for the result.
+   *
+   * A pending autosave is flushed first, for the same reason the AI edit does
+   * it: the run executes the saved graph, and running a version the user
+   * cannot see on the canvas would be indefensible.
+   */
+  async function runNow(dryRun: boolean) {
+    if (!selected || !graph || running) return;
+
+    setRunning(dryRun ? "dry" : "live");
+    setRunResult(null);
+    setError(null);
+
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    try {
+      if (!(await persistGraph(graph))) return;
+
+      const response = await fetch(`/api/workflows/${selected.id}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun }),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        run?: RunSummary;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !body?.run) {
+        setError(body?.error ?? "Could not run the workflow.");
+        return;
+      }
+      setRunResult({ ...body.run, dryRun });
+      router.refresh();
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
   async function confirmDelete() {
     if (!pendingDelete) return;
 
@@ -380,6 +443,26 @@ function StudioInner({
                 </p>
               </div>
 
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  disabled={running !== false}
+                  onClick={() => void runNow(true)}
+                  title="Walk the workflow without calling any tool or sending anything"
+                >
+                  {running === "dry" ? "Testing…" : "Test run"}
+                </button>
+                <button
+                  type="button"
+                  className={primaryButton}
+                  disabled={running !== false}
+                  onClick={() => void runNow(false)}
+                >
+                  {running === "live" ? "Running…" : "Run now"}
+                </button>
+              </div>
+
               {localVersions.length > 1 ? (
                 <label className="flex items-center gap-2 text-xs text-[#666] dark:text-[#999]">
                   History
@@ -410,6 +493,57 @@ function StudioInner({
               <p className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
                 {error}
               </p>
+            ) : null}
+
+            {runResult ? (
+              <div
+                className={`border-b px-4 py-2 text-sm ${
+                  runResult.status === "SUCCEEDED"
+                    ? "border-[#ebebeb] text-[#666] dark:border-[#1a1a1a] dark:text-[#999]"
+                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+                }`}
+              >
+                <p className="font-medium">
+                  {runResult.dryRun ? "Test run" : "Run"}{" "}
+                  {runResult.status === "SUCCEEDED" ? "succeeded" : "failed"}
+                  {runResult.dryRun ? " — nothing was sent" : ""}
+                </p>
+                {runResult.error ? <p className="mt-0.5">{runResult.error}</p> : null}
+
+                {/* The result is why the run was started, so it leads rather
+                    than hiding behind a disclosure. */}
+                {runResult.output ? (
+                  <div className="mt-2">
+                    <p className="text-[10px] font-semibold tracking-wide text-[#999] uppercase dark:text-[#666]">
+                      Result
+                    </p>
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[#f5f5f5] px-3 py-2 font-sans text-sm text-black dark:bg-[#1a1a1a] dark:text-[#ededed]">
+                      {runResult.output}
+                    </pre>
+                  </div>
+                ) : null}
+
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs">
+                    {runResult.steps.length} step
+                    {runResult.steps.length === 1 ? "" : "s"}
+                  </summary>
+                  <ol className="mt-1 flex flex-col gap-2 text-xs">
+                    {runResult.steps.map((step) => (
+                      <li key={step.nodeId}>
+                        <span className="font-mono">{step.toolSlug ?? "model"}</span>{" "}
+                        {step.status.toLowerCase()}
+                        {step.error ? ` — ${step.error}` : ""}
+                        {step.output ? (
+                          <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[#f5f5f5] px-2 py-1 font-mono text-[11px] dark:bg-[#1a1a1a]">
+                            {step.output}
+                          </pre>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              </div>
             ) : null}
 
             <div className="relative min-h-0 flex-1">
