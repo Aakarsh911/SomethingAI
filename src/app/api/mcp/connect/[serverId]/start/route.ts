@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { appUrl } from "@/lib/app-url";
-import { startComposioConnect } from "@/lib/mcp/composio";
+import { startComposioConnect, usesRedirect } from "@/lib/mcp/composio";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +54,18 @@ export async function GET(
     integrations.searchParams.set(
       "error",
       `${server.name} does not use a hosted authorization flow.`,
+    );
+    return NextResponse.redirect(integrations);
+  }
+
+  // Most Composio toolkits authenticate with a key rather than a consent
+  // screen, and there is nowhere to send the browser for those. The UI
+  // already renders a form instead of a link, so reaching here means a stale
+  // page or a hand-typed URL.
+  if (!usesRedirect(server)) {
+    integrations.searchParams.set(
+      "error",
+      `${server.name} is connected by entering credentials, not by authorizing in a browser.`,
     );
     return NextResponse.redirect(integrations);
   }

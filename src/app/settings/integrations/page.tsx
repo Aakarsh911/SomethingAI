@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import { listServersForUser } from "@/lib/mcp/servers";
+import { countServersForUser, listServersForUser } from "@/lib/mcp/servers";
 import { IntegrationsList } from "./integrations-list";
 
 export const dynamic = "force-dynamic";
@@ -9,21 +9,39 @@ export const metadata = {
   title: "Integrations",
 };
 
+/**
+ * How much of the catalog one page shows. Composio brokers ~1500
+ * integrations, so browsing is search-first: the rest are a query away
+ * rather than a scroll away.
+ */
+const PAGE_SIZE = 24;
+
 export default async function IntegrationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; connected?: string }>;
+  searchParams: Promise<{ error?: string; connected?: string; q?: string }>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
 
-  const [servers, { error, connected }] = await Promise.all([
-    listServersForUser(user.id),
-    searchParams,
+  const { error, connected, q } = await searchParams;
+  const query = q?.trim() || undefined;
+
+  // The user's own connections are fetched separately from the catalog slice
+  // so they stay pinned to the top of the page. Folding them into the same
+  // query would drop a connected integration out of view as soon as a search
+  // did not match it.
+  const [connections, servers, total] = await Promise.all([
+    listServersForUser(user.id, { connectedOnly: true }),
+    listServersForUser(user.id, { query, limit: PAGE_SIZE }),
+    countServersForUser(user.id, { query }),
   ]);
 
+  const connectedIds = new Set(connections.map((server) => server.id));
+  const catalog = servers.filter((server) => !connectedIds.has(server.id));
+
   const connectedServer = connected
-    ? servers.find((server) => server.slug === connected)
+    ? connections.find((server) => server.slug === connected)
     : undefined;
 
   return (
@@ -35,6 +53,9 @@ export default async function IntegrationsPage({
         <p className="text-[#666] dark:text-[#999]">
           Connect MCP servers to give your assistant access to your tools. You
           can revoke any connection at any time.
+        </p>
+        <p className="text-sm text-[#999] dark:text-[#666]">
+          {total.toLocaleString()} integrations available.
         </p>
       </header>
 
@@ -57,7 +78,13 @@ export default async function IntegrationsPage({
         </p>
       ) : null}
 
-      <IntegrationsList servers={servers} />
+      <IntegrationsList
+        connections={connections}
+        catalog={catalog}
+        query={query ?? ""}
+        total={total}
+        shown={catalog.length}
+      />
     </div>
   );
 }

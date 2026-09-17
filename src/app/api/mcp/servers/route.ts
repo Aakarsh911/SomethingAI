@@ -2,6 +2,7 @@ import { getCurrentUser, unauthorized } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { encrypt } from "@/lib/crypto";
 import {
+  countServersForUser,
   listServersForUser,
   parseServerUrl,
   slugifyServerName,
@@ -10,12 +11,38 @@ import type { McpAuthType, McpTransport } from "@/generated/prisma/enums";
 
 export const dynamic = "force-dynamic";
 
-/** Catalog + the caller's own servers, each with its connection state. */
-export async function GET() {
+/**
+ * Catalog + the caller's own servers, each with its connection state.
+ *
+ * Paged rather than exhaustive: the Composio catalog is ~1500 entries, so a
+ * bare GET returning everything is a megabyte of JSON nobody reads. Narrow it
+ * with `?q=`, `?category=` and `?limit=`.
+ */
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
+
+export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) return unauthorized();
 
-  return Response.json({ servers: await listServersForUser(user.id) });
+  const params = new URL(request.url).searchParams;
+  const requested = Number(params.get("limit"));
+  const limit =
+    Number.isFinite(requested) && requested > 0
+      ? Math.min(requested, MAX_LIMIT)
+      : DEFAULT_LIMIT;
+
+  const options = {
+    query: params.get("q") ?? undefined,
+    category: params.get("category") ?? undefined,
+  };
+
+  const [servers, total] = await Promise.all([
+    listServersForUser(user.id, { ...options, limit }),
+    countServersForUser(user.id, options),
+  ]);
+
+  return Response.json({ servers, total });
 }
 
 // A user-added server cannot use COMPOSIO: that flow is tied to a Composio

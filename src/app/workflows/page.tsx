@@ -16,7 +16,7 @@ export default async function WorkflowsPage() {
 
   const [workflows, servers] = await Promise.all([
     listWorkflows(user.id),
-    listServersForUser(user.id),
+    listServersForUser(user.id, { connectedOnly: true }),
   ]);
 
   return (
