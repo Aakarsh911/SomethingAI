@@ -190,3 +190,77 @@ export async function createMcpSession(options: {
     headers: session.mcp.headers as Record<string, string>,
   };
 }
+
+/**
+ * Runs one tool against a user's connected account.
+ *
+ * `dangerouslySkipVersionCheck` is set because nothing in this app pins
+ * toolkit versions yet. Without it every execution throws the moment a
+ * version resolves to "latest", which is the normal case here. Pinning is the
+ * right fix and belongs with the tool catalogue, not with the executor.
+ */
+export async function executeComposioTool(options: {
+  userId: string;
+  toolSlug: string;
+  arguments: Record<string, unknown>;
+  connectedAccountId?: string | null;
+}): Promise<unknown> {
+  let response;
+  try {
+    response = await client().tools.execute(options.toolSlug, {
+      userId: options.userId,
+      arguments: options.arguments,
+      ...(options.connectedAccountId
+        ? { connectedAccountId: options.connectedAccountId }
+        : {}),
+      dangerouslySkipVersionCheck: true,
+    });
+  } catch (error) {
+    const detail = extractToolError(error);
+    throw detail ? new Error(`${options.toolSlug}: ${detail}`) : error;
+  }
+
+  // Composio reports tool-level failures in the body rather than by throwing,
+  // so a run would otherwise record a failed call as a successful step.
+  if (!response.successful) {
+    throw new Error(response.error ?? `${options.toolSlug} failed.`);
+  }
+
+  return response.data;
+}
+
+/**
+ * Digs the provider's real explanation out of a Composio error.
+ *
+ * `ComposioToolExecutionError.message` is always "Error executing the tool X",
+ * which tells the person reading a run log nothing at all. The cause it wraps
+ * carries the actual reason — an oversized response, a revoked token — and
+ * that is the only part worth recording.
+ */
+function extractToolError(error: unknown): string | null {
+  const seen = new Set<unknown>();
+  let message: string | null = null;
+  let fix: string | null = null;
+
+  const walk = (value: unknown, depth: number) => {
+    if (depth > 6 || value === null || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    const record = value as Record<string, unknown>;
+    // Taken from the innermost frame that has one: the outer frames repeat the
+    // SDK's generic wording, the inner one is the provider speaking.
+    if (typeof record.message === "string" && record.message.trim()) {
+      message = record.message.trim();
+    }
+    if (typeof record.suggested_fix === "string" && record.suggested_fix.trim()) {
+      fix = record.suggested_fix.trim();
+    }
+
+    for (const nested of Object.values(record)) walk(nested, depth + 1);
+  };
+
+  if (error instanceof Error) walk(error.cause, 0);
+  if (!message) return null;
+  return fix && fix !== message ? `${message} ${fix}` : message;
+}
