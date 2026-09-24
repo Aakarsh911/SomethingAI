@@ -401,7 +401,13 @@ export async function executeComposioTool(options: {
   // Composio reports tool-level failures in the body rather than by throwing,
   // so a run would otherwise record a failed call as a successful step.
   if (!response.successful) {
-    throw new Error(response.error ?? `${options.toolSlug} failed.`);
+    // Not the same path as the catch above: Composio reports some failures in
+    // the body instead of throwing, and `error` is then the provider's own
+    // response verbatim — often a JSON document rather than a sentence.
+    const detail = readableError(response.error);
+    throw new Error(
+      detail ? `${options.toolSlug}: ${detail}` : `${options.toolSlug} failed.`,
+    );
   }
 
   return response.data;
@@ -415,6 +421,70 @@ export async function executeComposioTool(options: {
  * carries the actual reason — an oversized response, a revoked token — and
  * that is the only part worth recording.
  */
+/**
+ * Turns whatever a provider called an error into one readable sentence.
+ *
+ * Providers answer with a JSON document far more often than with a sentence,
+ * and Google's is HTML too. Left alone it reaches the run log as a wall of
+ * escaped markup, which is no more use than the generic message it replaced.
+ */
+function readableError(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const found = deepestMessage(JSON.parse(trimmed));
+        if (found) return stripMarkup(found);
+      } catch {
+        // Not JSON after all; fall through and show it as written.
+      }
+    }
+    return stripMarkup(trimmed);
+  }
+
+  const found = deepestMessage(value);
+  return found ? stripMarkup(found) : null;
+}
+
+/** The innermost `message`, which is the one closest to the real cause. */
+function deepestMessage(value: unknown): string | null {
+  const seen = new Set<unknown>();
+  let message: string | null = null;
+
+  const walk = (node: unknown, depth: number) => {
+    if (depth > 6 || node === null || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    const record = node as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message.trim()) {
+      message = record.message.trim();
+    }
+    for (const nested of Object.values(record)) walk(nested, depth + 1);
+  };
+
+  walk(value, 0);
+  return message;
+}
+
+function stripMarkup(text: string): string {
+  const decoded = text
+    .replace(/<[^>]+>/g, "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  return decoded.length > 600 ? `${decoded.slice(0, 600)}…` : decoded;
+}
+
 function extractToolError(error: unknown): string | null {
   const seen = new Set<unknown>();
   let message: string | null = null;
