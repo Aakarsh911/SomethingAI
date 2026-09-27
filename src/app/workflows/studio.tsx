@@ -56,10 +56,13 @@ type ModificationMessage = {
 };
 
 const primaryButton =
-  "h-8 cursor-pointer rounded-full border border-transparent bg-black px-3 text-sm font-medium text-neutral-50 transition-all duration-200 hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
+  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
 
 const secondaryButton =
-  "h-8 cursor-pointer rounded-full border border-[#ebebeb] bg-transparent px-3 text-sm font-medium text-black transition-all duration-200 hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]";
+  "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
+
+const ghostLink =
+  "rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#666] transition hover:bg-[#f5f5f5] hover:text-black dark:text-[#999] dark:hover:bg-[#1a1a1a] dark:hover:text-[#ededed]";
 
 export function WorkflowStudio(props: {
   workflows: WorkflowListItem[];
@@ -362,60 +365,78 @@ function StudioInner({
   }
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-neutral-950">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-[#ebebeb] dark:border-[#1a1a1a]">
-        <div className="flex items-center justify-between px-4 py-4">
-          <Link href="/workflows" className="text-sm font-semibold tracking-[-0.2px]">
-            Workflows
-          </Link>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/settings/integrations"
-              className="text-xs text-[#666] underline underline-offset-4 dark:text-[#999]"
-            >
+    <div className="flex h-[100dvh] overflow-hidden bg-[#fafafa] dark:bg-[#0a0a0a]">
+      <aside className="flex w-80 shrink-0 flex-col border-r border-[#ebebeb] bg-white dark:border-[#262626] dark:bg-neutral-950">
+        <div className="border-b border-[#ebebeb] px-5 py-5 dark:border-[#262626]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <Link
+                href="/workflows"
+                className="text-base font-semibold tracking-[-0.3px] text-black dark:text-[#ededed]"
+              >
+                Workflows
+              </Link>
+              <p className="mt-0.5 text-xs text-[#666] dark:text-[#999]">
+                Build and run automations
+              </p>
+            </div>
+            <UserButton />
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Link href="/workflows/new" className={ghostLink}>
+              New with AI
+            </Link>
+            <Link href="/settings/integrations" className={ghostLink}>
               Integrations
             </Link>
-            <UserButton />
           </div>
         </div>
 
-        <form className="flex gap-2 px-4 pb-4" onSubmit={createWorkflow}>
-          <input
-            className="h-8 flex-1 rounded-lg border border-[#ebebeb] bg-transparent px-2 text-sm outline-none focus:border-neutral-400 dark:border-[#1a1a1a]"
-            value={nameDraft}
-            onChange={(event) => setNameDraft(event.target.value)}
-            placeholder="New workflow"
-            aria-label="New workflow name"
-          />
-          <button type="submit" className={primaryButton} disabled={!nameDraft.trim()}>
-            Add
-          </button>
+        <form className="border-b border-[#ebebeb] px-4 py-4 dark:border-[#262626]" onSubmit={createWorkflow}>
+          <label className="mb-2 block text-xs font-medium text-[#666] dark:text-[#999]">
+            Create workflow
+          </label>
+          <div className="flex gap-2">
+            <input
+              className="h-9 min-w-0 flex-1 rounded-lg border border-[#ebebeb] bg-[#fafafa] px-3 text-sm outline-none focus:border-neutral-400 dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]"
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              placeholder="Weekly report"
+              aria-label="New workflow name"
+            />
+            <button type="submit" className={primaryButton} disabled={!nameDraft.trim()}>
+              Add
+            </button>
+          </div>
         </form>
 
-        <nav className="flex-1 overflow-y-auto px-2 pb-4">
+        <nav className="flex-1 overflow-y-auto px-3 py-4">
+          <p className="mb-2 px-2 text-xs font-medium tracking-wide text-[#999] uppercase dark:text-[#666]">
+            Your workflows
+          </p>
           {workflows.length === 0 ? (
-            <p className="px-2 text-sm text-[#666] dark:text-[#999]">
-              No workflows yet. Add one to open the canvas.
+            <p className="rounded-xl border border-dashed border-[#ebebeb] px-4 py-6 text-center text-sm text-[#666] dark:border-[#262626] dark:text-[#999]">
+              No workflows yet. Create one above or use New with AI.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col gap-1.5">
               {workflows.map((workflow) => {
                 const active = selected?.id === workflow.id;
                 return (
-                  <li key={workflow.id} className="group flex items-center gap-1">
+                  <li key={workflow.id} className="group flex items-center gap-1.5">
                     <Link
                       href={`/workflows/${workflow.id}`}
-                      className={`min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-sm ${
+                      className={`min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-sm transition ${
                         active
-                          ? "bg-black text-neutral-50 dark:bg-[#ededed] dark:text-black"
-                          : "text-black hover:bg-[#f2f2f2] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
+                          ? "bg-black font-medium text-neutral-50 shadow-sm dark:bg-[#ededed] dark:text-black"
+                          : "text-black hover:bg-[#f5f5f5] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
                       }`}
                     >
                       {workflow.name}
                     </Link>
                     <button
                       type="button"
-                      className={`${secondaryButton} px-2`}
+                      className="rounded-lg px-2 py-2 text-xs text-[#999] opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
                       onClick={() => setPendingDelete(workflow)}
                     >
                       Delete
@@ -431,19 +452,45 @@ function StudioInner({
       <section className="flex min-w-0 flex-1 flex-col">
         {selected && graph ? (
           <>
-            <header className="flex items-center justify-between gap-3 border-b border-[#ebebeb] px-4 py-3 dark:border-[#1a1a1a]">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ebebeb] bg-white px-5 py-4 dark:border-[#262626] dark:bg-neutral-950">
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold">{displayName}</h1>
+                <h1 className="truncate text-lg font-semibold tracking-[-0.3px]">
+                  {displayName}
+                </h1>
                 <p className="text-xs text-[#666] dark:text-[#999]">
                   {saveState === "saving"
                     ? "Saving…"
                     : saveState === "error"
                       ? "Save failed"
-                      : `Saved · v${localVersions[0]?.revision ?? 1}`}
+                      : `Saved · version ${localVersions[0]?.revision ?? 1}`}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {localVersions.length > 1 ? (
+                  <label className="flex items-center gap-2 text-xs text-[#666] dark:text-[#999]">
+                    History
+                    <select
+                      className="h-9 rounded-lg border border-[#ebebeb] bg-[#fafafa] px-3 text-sm text-black dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const revision = Number(event.target.value);
+                        event.target.value = "";
+                        if (revision) void restore(revision);
+                      }}
+                    >
+                      <option value="" disabled>
+                        Restore a version
+                      </option>
+                      {localVersions.map((version) => (
+                        <option key={version.id} value={version.revision}>
+                          v{version.revision}
+                          {version.note ? ` · ${version.note}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <button
                   type="button"
                   className={secondaryButton}
@@ -462,31 +509,6 @@ function StudioInner({
                   {running === "live" ? "Running…" : "Run now"}
                 </button>
               </div>
-
-              {localVersions.length > 1 ? (
-                <label className="flex items-center gap-2 text-xs text-[#666] dark:text-[#999]">
-                  History
-                  <select
-                    className="h-8 rounded-lg border border-[#ebebeb] bg-transparent px-2 text-sm text-black dark:border-[#1a1a1a] dark:text-[#ededed]"
-                    defaultValue=""
-                    onChange={(event) => {
-                      const revision = Number(event.target.value);
-                      event.target.value = "";
-                      if (revision) void restore(revision);
-                    }}
-                  >
-                    <option value="" disabled>
-                      Restore a version
-                    </option>
-                    {localVersions.map((version) => (
-                      <option key={version.id} value={version.revision}>
-                        v{version.revision}
-                        {version.note ? ` · ${version.note}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
             </header>
 
             {error ? (
@@ -563,7 +585,7 @@ function StudioInner({
               ) : null}
             </div>
 
-            <div className="shrink-0 border-t border-[#ebebeb] bg-white px-4 py-3 dark:border-[#1a1a1a] dark:bg-neutral-950">
+            <div className="shrink-0 border-t border-[#ebebeb] bg-white px-5 py-4 dark:border-[#262626] dark:bg-neutral-950">
               {modificationQuestions.length > 0 ? (
                 <div className="mb-3 rounded-lg bg-[#f5f5f5] px-3 py-2 dark:bg-[#1a1a1a]">
                   <p className="mb-1 text-xs font-medium text-black dark:text-[#ededed]">
@@ -616,12 +638,19 @@ function StudioInner({
             </div>
           </>
         ) : (
-          <div className="flex flex-1 flex-col items-start justify-center gap-2 px-10">
-            <h1 className="text-xl font-semibold tracking-[-0.4px]">Select a workflow</h1>
-            <p className="max-w-md text-sm text-[#666] dark:text-[#999]">
-              Add one in the sidebar, then right-click the canvas to drop a
-              connected tool onto it. Drag between handles to wire the steps.
-            </p>
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-10 text-center">
+            <div className="max-w-md rounded-2xl border border-[#ebebeb] bg-white p-8 shadow-sm dark:border-[#262626] dark:bg-neutral-950">
+              <h1 className="text-xl font-semibold tracking-[-0.4px]">
+                Select a workflow
+              </h1>
+              <p className="mt-2 text-sm text-[#666] dark:text-[#999]">
+                Create one in the sidebar, then right-click the canvas to add a
+                connected tool. Drag between handles to wire steps together.
+              </p>
+              <Link href="/workflows/new" className={`${primaryButton} mt-5 inline-flex`}>
+                Build with AI
+              </Link>
+            </div>
             {error ? <p className="text-sm text-red-600">{error}</p> : null}
           </div>
         )}
