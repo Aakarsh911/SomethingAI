@@ -6,7 +6,7 @@ import { UserButton } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { McpServerView } from "@/lib/mcp/servers";
-import type { WorkflowGraph } from "@/lib/workflows/graph";
+import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -107,6 +107,13 @@ function StudioInner({
   const [runResult, setRunResult] = useState<RunSummary | null>(null);
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
+
+  // Steps placed on the canvas but never given a tool. Surfaced here so the
+  // user finds out before starting a live run, rather than from a failed step
+  // partway through one that has already sent something.
+  const unconfigured = (graph?.nodes ?? [])
+    .filter((node) => node.kind === "tool" && isUnconfiguredTool(node.toolSlug))
+    .map((node) => node.label ?? node.id);
 
   useEffect(() => {
     return () => {
@@ -444,6 +451,15 @@ function StudioInner({
               </div>
 
               <div className="flex items-center gap-2">
+                {unconfigured.length > 0 ? (
+                  <span
+                    className="text-xs text-amber-700 dark:text-amber-500"
+                    title={unconfigured.join(", ")}
+                  >
+                    {unconfigured.length} step
+                    {unconfigured.length === 1 ? "" : "s"} need a tool
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className={secondaryButton}
@@ -456,8 +472,16 @@ function StudioInner({
                 <button
                   type="button"
                   className={primaryButton}
-                  disabled={running !== false}
+                  // A live run is blocked, but a test run is not: walking a
+                  // half-built workflow to see how far it gets is the point of
+                  // the dry run, and it calls nothing.
+                  disabled={running !== false || unconfigured.length > 0}
                   onClick={() => void runNow(false)}
+                  title={
+                    unconfigured.length > 0
+                      ? "Every step needs a tool before this can run"
+                      : undefined
+                  }
                 >
                   {running === "live" ? "Running…" : "Run now"}
                 </button>

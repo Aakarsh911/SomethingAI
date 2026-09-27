@@ -22,8 +22,10 @@ import {
   newNodeId,
   type FlowEdge,
   type FlowNode,
+  type FlowNodeData,
 } from "@/lib/workflows/flow";
-import type { WorkflowGraph } from "@/lib/workflows/graph";
+import { UNCONFIGURED_TOOL, type WorkflowGraph } from "@/lib/workflows/graph";
+import { NodeInspector } from "./node-inspector";
 import { BranchNode, LlmNode, ToolNode, TriggerNode } from "./workflow-nodes";
 
 const nodeTypes = {
@@ -59,6 +61,10 @@ export function WorkflowCanvas({
   const [nodes, setNodes] = useState<FlowNode[]>(initial.nodes);
   const [edges, setEdges] = useState<FlowEdge[]>(initial.edges);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  // The node whose inspector is open, by id rather than by value, so the
+  // panel reads the current node on every render instead of a snapshot taken
+  // when it was opened.
+  const [inspectingId, setInspectingId] = useState<string | null>(null);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -133,6 +139,21 @@ export function WorkflowCanvas({
     [emit],
   );
 
+  /** Applies an inspector edit to one node and saves. */
+  const patchNode = useCallback(
+    (nodeId: string, patch: Partial<FlowNodeData>) => {
+      setNodes((current) => {
+        const next = current.map((node) =>
+          node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node,
+        );
+        nodesRef.current = next;
+        emit(next, edgesRef.current);
+        return next;
+      });
+    },
+    [emit],
+  );
+
   function addConnectionNode(server: McpServerView) {
     if (!menu) return;
 
@@ -144,7 +165,10 @@ export function WorkflowCanvas({
         kind: "tool",
         label: server.name,
         serverSlug: server.slug,
-        toolSlug: "action",
+        // Which tool is the user's next decision, not a guess to be made
+        // here. The inspector opens on the same click to ask for it.
+        toolSlug: UNCONFIGURED_TOOL,
+        inputs: {},
       },
     };
 
@@ -155,7 +179,18 @@ export function WorkflowCanvas({
       return next;
     });
     setMenu(null);
+    setInspectingId(node.id);
   }
+
+  // Only tool nodes have anything to inspect. Resolved from `nodes` each
+  // render so an id left behind by a deleted node simply closes the panel.
+  const inspecting =
+    nodes.find((node) => node.id === inspectingId && node.data.kind === "tool") ??
+    null;
+
+  const inspectingServer = inspecting
+    ? connections.find((server) => server.slug === inspecting.data.serverSlug)
+    : undefined;
 
   return (
     <div className="relative h-full w-full">
@@ -166,6 +201,12 @@ export function WorkflowCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeClick={(_event, node) => {
+          setMenu(null);
+          // Clicking a node that cannot be configured closes the panel rather
+          // than leaving it showing the previous selection.
+          setInspectingId(node.data.kind === "tool" ? node.id : null);
+        }}
         onPaneClick={() => setMenu(null)}
         onPaneContextMenu={(event) => {
           event.preventDefault();
@@ -227,6 +268,17 @@ export function WorkflowCanvas({
             </ul>
           )}
         </div>
+      ) : null}
+
+      {inspecting ? (
+        <NodeInspector
+          node={inspecting}
+          serverName={
+            inspectingServer?.name ?? inspecting.data.serverSlug ?? "Connection"
+          }
+          onChange={patchNode}
+          onClose={() => setInspectingId(null)}
+        />
       ) : null}
     </div>
   );

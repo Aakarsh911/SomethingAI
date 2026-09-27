@@ -4,12 +4,16 @@ import { listRuns } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
 
+/** Covers the wait in runWorkflow, with room to spare. */
+export const maxDuration = 300;
+
 /**
- * Runs a workflow now and answers with the finished run.
+ * Queues a workflow for the worker and answers with the finished run.
  *
- * Execution is inline, so the response is the result rather than a promise of
- * one. That keeps "Run now" honest — the button cannot report success for
- * something that has not happened yet.
+ * The response waits for the result rather than returning a promise of one.
+ * That keeps "Run now" honest — the button cannot report success for
+ * something that has not happened yet. A run that outlasts the wait answers
+ * 202 and carries on; its outcome lands in run history.
  */
 export async function POST(
   request: Request,
@@ -21,7 +25,7 @@ export async function POST(
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const { id } = await params;
 
-  const summary = await runWorkflow({
+  const outcome = await runWorkflow({
     userId: user.id,
     workflowId: id,
     trigger: "MANUAL",
@@ -30,11 +34,22 @@ export async function POST(
 
   // Null means the workflow is missing or owned by somebody else. The same
   // answer for both, so this cannot be used to probe for ids.
-  if (!summary) {
+  if (!outcome) {
     return Response.json({ error: "Workflow not found." }, { status: 404 });
   }
 
-  return Response.json({ run: summary });
+  if (outcome.kind === "pending") {
+    const error =
+      outcome.status === "QUEUED"
+        ? "The run is queued but no worker has picked it up. Is the workflow worker running?"
+        : "The run is still going. Its result will appear in run history.";
+    return Response.json(
+      { runId: outcome.runId, status: outcome.status, error },
+      { status: 202 },
+    );
+  }
+
+  return Response.json({ run: outcome.summary });
 }
 
 /** Recent runs for the run history panel. */

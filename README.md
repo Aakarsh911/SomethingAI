@@ -21,9 +21,9 @@ Think Zapier or n8n, except the automation is described in natural language and 
 - **MCP connections:** `/settings/integrations` — catalog servers (Composio-brokered, e.g. Gmail) and user-owned custom servers. Tokens stay with Composio or are AES-256-GCM encrypted API keys.
 - **Workflow studio:** `/workflows` — sidebar to add and delete workflows (delete asks for confirmation), React Flow canvas, right-click → add a node from the user's connected MCP servers, drag handles to connect nodes.
 - **Graph storage:** Postgres. `Workflow.graph` is the working copy (JSONB). Each save also appends an immutable `WorkflowVersion` row so history can be restored without rewriting earlier snapshots. Node kinds are validated by Zod in [`src/lib/workflows/graph.ts`](src/lib/workflows/graph.ts) before anything is written — the database does not enforce blob shape.
-- **Run tables:** `WorkflowRun` (with a `graphSnapshot` of what actually executed) and `WorkflowStepRun` exist for the future executor.
+- **Execution:** a Go worker in [`worker/`](worker/) runs every workflow, manual and scheduled. The app queues a run by inserting a `QUEUED` `WorkflowRun` (with a `graphSnapshot` of what will execute); the worker claims it, runs the graph, and writes each step to `WorkflowStepRun`. The worker also owns the schedule — there is no cron endpoint.
 
-The chat compiler, Temporal interpreter, live run highlighting, and approval gates are not built yet. The studio writes the same graph format those pieces will consume.
+Temporal-backed durable waits, live run highlighting, and approval gates are not built yet. The worker reads the same graph format those pieces will consume.
 
 ## Tech stack
 
@@ -33,17 +33,17 @@ The chat compiler, Temporal interpreter, live run highlighting, and approval gat
 | Graph canvas | React Flow (xyflow) | Visual editor and, later, live execution highlighting |
 | NL → graph compiler | Claude with structured/tool-call output, Zod-validated server-side | Never persist raw LLM JSON |
 | Graph & run storage | Postgres via Prisma 7 | `Workflow`, `WorkflowVersion`, `WorkflowRun`, `WorkflowStepRun`; graphs as JSONB |
-| Execution engine | Temporal (TypeScript SDK) | Durable waits, per-activity retries, approval signals |
+| Execution engine | Go worker (`worker/`), Postgres as the queue; Temporal Go SDK later | Claims runs with `SKIP LOCKED`; durable waits, retries and approval signals once on Temporal |
 | MCP | `@modelcontextprotocol/sdk` + Composio for hosted auth | Isolated activity per server call |
 | Auth | Clerk | Multi-tenant; viewer / editor / admin later |
 | Secrets | Encrypted columns today; Infisical/Doppler/KMS later | OAuth tokens never stored in the clear |
 | Real-time execution | Redis pub/sub + WebSockets (or Supabase Realtime) | Node-by-node canvas updates |
 | Observability | OpenTelemetry + Axiom or Sentry | Native Temporal traces |
-| Deployment | Vercel (app), Temporal Cloud or Fly.io, MCP servers on Fly.io / Cloud Run | |
+| Deployment | Vercel (app), worker on Fly.io (`worker/Dockerfile`), MCP servers on Fly.io / Cloud Run | |
 
 ## Key architectural decision
 
-The compiler emits a **generic graph** interpreted by **one generic Temporal workflow**. Users create arbitrary shapes at runtime — we cannot redeploy code for every new workflow — so Temporal is a graph interpreter, not a generated template.
+The compiler emits a **generic graph** interpreted by **one generic engine** — today the Go worker, later one generic Temporal workflow. Users create arbitrary shapes at runtime — we cannot redeploy code for every new workflow — so the engine is a graph interpreter, not a generated template.
 
 The graph is the source of truth, not the chat transcript. Chat is one way to edit the graph; the visual editor must represent and modify anything the compiler produces.
 
@@ -71,6 +71,8 @@ npm run db:migrate
 npm run db:seed
 npm run dev
 ```
+
+`npm run dev` starts both the website and the Go workflow worker (needs Go 1.27+), with their logs prefixed `[web]` and `[worker]`. Without the worker, "Run now" queues runs that never start, and schedules never fire. `npm run dev:web` and `npm run worker` start either one alone.
 
 Open [http://localhost:3000](http://localhost:3000). Signed-in users land on `/workflows`.
 

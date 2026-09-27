@@ -11,6 +11,23 @@ import { prisma } from "@/lib/db";
  * cheaper than detecting that after the fact.
  */
 
+/**
+ * One argument of a tool, as described by the tool's own input schema.
+ *
+ * Richer than a bare name because the canvas renders a form from this: a
+ * checkbox for a boolean and a dropdown for an enum are only possible if the
+ * type and the allowed values survive the trip from Composio.
+ */
+export type ToolParameter = {
+  name: string;
+  /** JSON Schema `type`, narrowed to what the form knows how to render. */
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object" | "unknown";
+  required: boolean;
+  description: string;
+  /** Present only for closed sets, which render as a dropdown. */
+  options?: string[];
+};
+
 export type AvailableTool = {
   serverSlug: string;
   serverName: string;
@@ -24,8 +41,14 @@ export type AvailableTool = {
    * the tool wants "max_results", and the argument is silently discarded at
    * call time. Knowing the real names lets the prompt state them and the
    * validator reject anything else.
+   *
+   * Kept as a flat list of names alongside `schema` because the prompt and
+   * `reconcileToolInputs` only ever need the names, and both run on every
+   * generation.
    */
   parameters: string[];
+  /** The same arguments with their types, for rendering an editor. */
+  schema: ToolParameter[];
 };
 
 const COMPOSIO_API = "https://backend.composio.dev/api/v3";
@@ -43,8 +66,77 @@ type ComposioTool = {
   slug?: string;
   name?: string;
   description?: string;
-  input_parameters?: { properties?: Record<string, unknown> };
+  input_parameters?: {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+  };
 };
+
+/** A single JSON Schema property, as far as the form cares about it. */
+type SchemaProperty = {
+  type?: unknown;
+  description?: unknown;
+  title?: unknown;
+  enum?: unknown;
+};
+
+const RENDERABLE_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "array",
+  "object",
+]);
+
+/**
+ * Flattens a tool's JSON Schema into a flat argument list.
+ *
+ * Only the top level is read. Nested object properties are left as a single
+ * `object` argument the user fills in as JSON, because generating a recursive
+ * form for arbitrary tool schemas is a much larger job than the value it adds
+ * for the handful of tools that need it.
+ */
+function readSchema(input: ComposioTool["input_parameters"]): ToolParameter[] {
+  const properties = input?.properties ?? {};
+  const required = new Set(
+    Array.isArray(input?.required)
+      ? input.required.filter((name): name is string => typeof name === "string")
+      : [],
+  );
+
+  return Object.entries(properties).map(([name, raw]) => {
+    const property = (raw ?? {}) as SchemaProperty;
+
+    // A union like ["string", "null"] is normal in these schemas; the first
+    // non-null entry is what the user actually types.
+    const declared = Array.isArray(property.type)
+      ? property.type.find((entry) => entry !== "null")
+      : property.type;
+
+    const options = Array.isArray(property.enum)
+      ? property.enum.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : undefined;
+
+    return {
+      name,
+      type:
+        typeof declared === "string" && RENDERABLE_TYPES.has(declared)
+          ? (declared as ToolParameter["type"])
+          : "unknown",
+      required: required.has(name),
+      description:
+        typeof property.description === "string"
+          ? property.description
+          : typeof property.title === "string"
+            ? property.title
+            : "",
+      ...(options && options.length > 0 ? { options } : {}),
+    };
+  });
+}
 
 async function fetchToolkitTools(
   toolkit: string,
@@ -71,13 +163,17 @@ async function fetchToolkitTools(
   const body = (await response.json()) as { items?: ComposioTool[] };
   const tools: AvailableTool[] = (body.items ?? [])
     .filter((tool): tool is ComposioTool & { slug: string } => Boolean(tool.slug))
-    .map((tool) => ({
-      serverSlug,
-      serverName,
-      toolSlug: tool.slug,
-      description: tool.description ?? tool.name ?? "",
-      parameters: Object.keys(tool.input_parameters?.properties ?? {}),
-    }));
+    .map((tool) => {
+      const schema = readSchema(tool.input_parameters);
+      return {
+        serverSlug,
+        serverName,
+        toolSlug: tool.slug,
+        description: tool.description ?? tool.name ?? "",
+        parameters: schema.map((parameter) => parameter.name),
+        schema,
+      };
+    });
 
   cache.set(toolkit, { at: Date.now(), tools });
   return tools;

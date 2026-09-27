@@ -11,6 +11,23 @@ import { z } from "zod";
 /** Bumped when the blob's shape changes incompatibly. Stored per row. */
 export const CURRENT_GRAPH_VERSION = 1;
 
+/**
+ * Stands in for the tool of a node that has been placed but not configured.
+ *
+ * A sentinel rather than an empty string because `toolSlug` below requires a
+ * non-empty value, and rather than a plausible name like "action" because
+ * that is indistinguishable from a real slug: it saves, it validates, and it
+ * fails only when the workflow finally runs, possibly weeks later on a
+ * schedule. This value exists to be detected — the inspector prompts for a
+ * tool, the studio blocks the run, and the executor names the node in its
+ * error.
+ */
+export const UNCONFIGURED_TOOL = "__unconfigured__";
+
+export function isUnconfiguredTool(toolSlug: string | undefined | null): boolean {
+  return !toolSlug || toolSlug === UNCONFIGURED_TOOL;
+}
+
 const nodeId = z
   .string()
   .min(1)

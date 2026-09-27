@@ -1,4 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
+import { UNCONFIGURED_TOOL } from "@/lib/workflows/graph";
 import type { WorkflowEdge, WorkflowGraph, WorkflowNode } from "@/lib/workflows/graph";
 
 export type FlowNodeData = {
@@ -6,6 +7,14 @@ export type FlowNodeData = {
   label: string;
   serverSlug?: string;
   toolSlug?: string;
+  /**
+   * The tool's argument template, edited by the inspector.
+   *
+   * Held on the flow node rather than read back off the saved graph so that
+   * an edit and a drag in the same debounce window do not overwrite each
+   * other: whichever change emits last would otherwise carry the stale copy.
+   */
+  inputs?: Record<string, unknown>;
   /**
    * Carried through the canvas so a round trip keeps it. An llm node whose
    * instruction is lost is indistinguishable from a trigger on the way back,
@@ -31,6 +40,7 @@ export function graphToFlow(graph: WorkflowGraph): {
         label: node.label ?? defaultLabel(node),
         serverSlug: node.kind === "tool" ? node.serverSlug : undefined,
         toolSlug: node.kind === "tool" ? node.toolSlug : undefined,
+        inputs: node.kind === "tool" ? node.inputs : undefined,
         instruction: node.kind === "llm" ? node.instruction : undefined,
       },
       deletable: node.kind !== "trigger",
@@ -68,8 +78,12 @@ export function flowToGraph(
             (existing && existing.kind === "tool" ? existing.serverSlug : "unknown"),
           toolSlug:
             node.data.toolSlug ??
-            (existing && existing.kind === "tool" ? existing.toolSlug : "action"),
-          inputs: existing && existing.kind === "tool" ? existing.inputs : {},
+            (existing && existing.kind === "tool"
+              ? existing.toolSlug
+              : UNCONFIGURED_TOOL),
+          inputs:
+            node.data.inputs ??
+            (existing && existing.kind === "tool" ? existing.inputs : {}),
         };
       }
 

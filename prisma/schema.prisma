@@ -325,8 +325,15 @@ model WorkflowRun {
   workflowId String
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
+  /// QUEUED rows are the queue: the Go worker (worker/) claims them with
+  /// FOR UPDATE SKIP LOCKED, moves them to RUNNING and executes them. The app
+  /// only ever inserts QUEUED.
   status  RunStatus       @default(QUEUED)
   trigger WorkflowTrigger
+
+  /// Run without calling any tool or model; each step records what it would
+  /// have sent.
+  dryRun Boolean @default(false)
 
   /// The graph exactly as it was when this run started.
   ///
@@ -341,6 +348,9 @@ model WorkflowRun {
   /// Failure summary for the run as a whole. Per-step detail lives on
   /// WorkflowStepRun.error.
   error      String?
+  /// Output of the last step that produced one, which is what a run
+  /// "returns". Written by the worker when the run finishes.
+  output     Json?
 
   stepRuns WorkflowStepRun[]
 

@@ -55,3 +55,6 @@ skills-lock.json
 # node_modules/next/dist/server/lib/generate-agent-files.js).
 AGENTS.md
 CLAUDE.md
+
+# Go worker build output
+/worker/bin/

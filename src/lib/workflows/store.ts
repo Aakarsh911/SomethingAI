@@ -272,44 +272,6 @@ export async function restoreWorkflowVersion(
   });
 }
 
-/**
- * Enabled workflows whose next run is due, oldest first.
- *
- * Not user-scoped — this is the scheduler's query, and it runs for everyone.
- * It is the only function here that crosses user boundaries, which is why it
- * takes no userId rather than taking one and ignoring it.
- */
-export function dueWorkflows(now: Date = new Date(), take = 100) {
-  return prisma.workflow.findMany({
-    where: { isEnabled: true, nextRunAt: { lte: now } },
-    orderBy: { nextRunAt: "asc" },
-    take,
-  });
-}
-
-/**
- * Records that a scheduled workflow just ran and advances its next due time.
- *
- * `nextRunAt` is computed forward from now rather than from the previous
- * value, so a workflow that was paused, or a worker that fell behind, catches
- * up to the next future occurrence instead of firing repeatedly to work
- * through every slot it missed.
- */
-export async function markScheduledRun(workflowId: string, ranAt = new Date()) {
-  const workflow = await prisma.workflow.findUnique({ where: { id: workflowId } });
-  if (!workflow) return null;
-
-  const next =
-    workflow.trigger === "SCHEDULE" && workflow.cron && workflow.timezone
-      ? nextRunAt(workflow.cron, workflow.timezone, ranAt)
-      : null;
-
-  return prisma.workflow.update({
-    where: { id: workflowId },
-    data: { lastRunAt: ranAt, nextRunAt: next },
-  });
-}
-
 /** True if a row was removed. Runs and step runs cascade. */
 export async function deleteWorkflow(userId: string, id: string) {
   const { count } = await prisma.workflow.deleteMany({ where: { id, userId } });
@@ -332,15 +294,19 @@ export function workflowsUsingServer(
 }
 
 /**
- * Opens a run and snapshots the graph as it stands right now.
+ * Queues a run for the Go worker (worker/) and snapshots the graph as it
+ * stands right now.
  *
- * The snapshot is the point of this function: without it, editing a workflow
- * silently rewrites what every earlier run appears to have done.
+ * The app never executes a workflow itself; inserting a QUEUED row is the
+ * whole handoff. The snapshot is the other point of this function: without
+ * it, editing a workflow silently rewrites what every earlier run appears to
+ * have done.
  */
-export async function startRun(
+export async function enqueueRun(
   userId: string,
   workflowId: string,
   trigger: WorkflowTrigger,
+  options: { dryRun?: boolean } = {},
 ) {
   const workflow = await getWorkflow(userId, workflowId);
   if (!workflow) return null;
@@ -348,61 +314,25 @@ export async function startRun(
   return prisma.workflowRun.create({
     data: {
       workflowId: workflow.id,
-      status: "RUNNING",
+      status: "QUEUED",
       trigger,
+      dryRun: options.dryRun ?? false,
       graphSnapshot: workflow.graph as Prisma.InputJsonValue,
       graphVersion: workflow.graphVersion,
-      startedAt: new Date(),
     },
   });
 }
 
-export function finishRun(
-  runId: string,
-  status: Extract<RunStatus, "SUCCEEDED" | "FAILED" | "CANCELED">,
-  error?: string,
-) {
-  return prisma.workflowRun.update({
-    where: { id: runId },
-    data: { status, error: error ?? null, finishedAt: new Date() },
+/** One run with its steps in execution order. Ownership-scoped via the join. */
+export function getRun(userId: string, runId: string) {
+  return prisma.workflowRun.findFirst({
+    where: { id: runId, workflow: { userId } },
+    include: { stepRuns: { orderBy: [{ startedAt: "asc" }, { createdAt: "asc" }] } },
   });
 }
 
-/**
- * Records the outcome of one attempt at one node.
- *
- * Retries append a new row rather than overwriting, so a flaky step keeps its
- * full history; `@@unique([runId, nodeId, attempt])` makes a double-write of
- * the same attempt a constraint error instead of a silent duplicate.
- */
-export function recordStepRun(input: {
-  runId: string;
-  nodeId: string;
-  attempt?: number;
-  status: RunStatus;
-  serverSlug?: string | null;
-  toolSlug?: string | null;
-  stepInput?: unknown;
-  output?: unknown;
-  error?: string | null;
-  startedAt?: Date | null;
-  finishedAt?: Date | null;
-}) {
-  return prisma.workflowStepRun.create({
-    data: {
-      runId: input.runId,
-      nodeId: input.nodeId,
-      attempt: input.attempt ?? 1,
-      status: input.status,
-      serverSlug: input.serverSlug ?? null,
-      toolSlug: input.toolSlug ?? null,
-      input: (input.stepInput ?? null) as Prisma.InputJsonValue,
-      output: (input.output ?? null) as Prisma.InputJsonValue,
-      error: input.error ?? null,
-      startedAt: input.startedAt ?? null,
-      finishedAt: input.finishedAt ?? null,
-    },
-  });
+export function isFinished(status: RunStatus): boolean {
+  return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELED";
 }
 
 /** Recent runs for a workflow, newest first. Ownership-scoped via the join. */
