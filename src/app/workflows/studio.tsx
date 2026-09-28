@@ -525,11 +525,21 @@ function StudioInner({
                     : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
                 }`}
               >
-                <p className="font-medium">
-                  {runResult.dryRun ? "Test run" : "Run"}{" "}
-                  {runResult.status === "SUCCEEDED" ? "succeeded" : "failed"}
-                  {runResult.dryRun ? " — nothing was sent" : ""}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-medium">
+                    {runResult.dryRun ? "Test run" : "Run"}{" "}
+                    {runResult.status === "SUCCEEDED" ? "succeeded" : "failed"}
+                    {runResult.dryRun ? " — nothing was sent" : ""}
+                  </p>
+                  <button
+                    type="button"
+                    aria-label="Close run result"
+                    className="-mr-1 cursor-pointer rounded px-1 text-base leading-none opacity-70 hover:opacity-100"
+                    onClick={() => setRunResult(null)}
+                  >
+                    &times;
+                  </button>
+                </div>
                 {runResult.error ? <p className="mt-0.5">{runResult.error}</p> : null}
 
                 {/* The result is why the run was started, so it leads rather
