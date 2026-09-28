@@ -7,7 +7,7 @@ import {
   parseGraph,
   type WorkflowGraph,
 } from "@/lib/workflows/graph";
-import { ScheduleError, nextRunAt } from "@/lib/workflows/schedule";
+import { ScheduleError, assertValidRunAt, nextRunAt } from "@/lib/workflows/schedule";
 
 /**
  * Persistence for workflows and their run history.
@@ -38,6 +38,7 @@ const summaryFields = {
   isEnabled: true,
   cron: true,
   timezone: true,
+  runAt: true,
   nextRunAt: true,
   lastRunAt: true,
   serverSlugs: true,
@@ -71,7 +72,12 @@ export type WorkflowInput = {
   isEnabled?: boolean;
   /** Required when trigger is SCHEDULE, ignored otherwise. */
   cron?: string | null;
-  /** IANA zone the cron is read in. Required alongside `cron`. */
+  /** Required when trigger is ONCE, ignored otherwise. */
+  runAt?: Date | null;
+  /**
+   * IANA zone the cron is read in, or the one-off time is shown in. Required
+   * alongside `cron` or `runAt`.
+   */
   timezone?: string | null;
   versionNote?: string | null;
 };
@@ -79,11 +85,12 @@ export type WorkflowInput = {
 type ResolvedSchedule = {
   cron: string | null;
   timezone: string | null;
+  runAt: Date | null;
   nextRunAt: Date | null;
 };
 
 /**
- * Works out the three schedule columns from a trigger and a cron.
+ * Works out the schedule columns from a trigger and its cron or run time.
  *
  * Kept in one place so the columns cannot disagree: a MANUAL workflow with a
  * leftover `nextRunAt` would be picked up by the scheduler and run on a
@@ -93,10 +100,19 @@ function resolveSchedule(
   trigger: WorkflowTrigger,
   cron: string | null | undefined,
   timezone: string | null | undefined,
+  runAt: Date | null | undefined,
   from: Date = new Date(),
 ): ResolvedSchedule {
+  if (trigger === "ONCE") {
+    if (!runAt || !timezone) {
+      throw new ScheduleError("A one-time workflow needs a date, a time and a timezone.");
+    }
+    assertValidRunAt(runAt, timezone, from);
+    return { cron: null, timezone, runAt, nextRunAt: runAt };
+  }
+
   if (trigger !== "SCHEDULE") {
-    return { cron: null, timezone: null, nextRunAt: null };
+    return { cron: null, timezone: null, runAt: null, nextRunAt: null };
   }
 
   if (!cron || !timezone) {
@@ -107,7 +123,7 @@ function resolveSchedule(
 
   // Throws on a malformed expression or an unknown zone, so an invalid
   // schedule fails at save time rather than silently never firing.
-  return { cron, timezone, nextRunAt: nextRunAt(cron, timezone, from) };
+  return { cron, timezone, runAt: null, nextRunAt: nextRunAt(cron, timezone, from) };
 }
 
 export type WorkflowVersionSummary = {
@@ -138,7 +154,12 @@ export function createWorkflow(userId: string, input: WorkflowInput) {
   const trigger = input.trigger ?? "MANUAL";
   // Outside the transaction on purpose: an invalid cron should fail before a
   // transaction is opened, not roll one back.
-  const schedule = resolveSchedule(trigger, input.cron, input.timezone);
+  const schedule = resolveSchedule(
+    trigger,
+    input.cron,
+    input.timezone,
+    input.runAt,
+  );
 
   return prisma.$transaction(async (tx) => {
     const workflow = await tx.workflow.create({
@@ -201,6 +222,7 @@ export async function updateWorkflow(
     input.trigger !== undefined ||
     input.cron !== undefined ||
     input.timezone !== undefined ||
+    input.runAt !== undefined ||
     // Re-enabling recomputes too: a workflow disabled for a week has a
     // nextRunAt in the past, which would otherwise fire the moment it is
     // switched back on.
@@ -214,6 +236,7 @@ export async function updateWorkflow(
         trigger,
         input.cron !== undefined ? input.cron : current.cron,
         input.timezone !== undefined ? input.timezone : current.timezone,
+        input.runAt !== undefined ? input.runAt : current.runAt,
       ),
     );
   }

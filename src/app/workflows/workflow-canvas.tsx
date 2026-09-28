@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -46,10 +46,16 @@ export function WorkflowCanvas({
   graph,
   connections,
   onChange,
+  renderTriggerInspector,
 }: {
   graph: WorkflowGraph;
   connections: McpServerView[];
   onChange: (graph: WorkflowGraph) => void;
+  /**
+   * The trigger's panel edits the workflow's schedule, which lives on the
+   * workflow row rather than in the graph, so the studio supplies it.
+   */
+  renderTriggerInspector?: (onClose: () => void) => ReactNode;
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const initial = graphToFlow(graph);
@@ -182,11 +188,15 @@ export function WorkflowCanvas({
     setInspectingId(node.id);
   }
 
-  // Only tool nodes have anything to inspect. Resolved from `nodes` each
-  // render so an id left behind by a deleted node simply closes the panel.
+  // Tool nodes and the trigger have something to inspect. Resolved from
+  // `nodes` each render so an id left behind by a deleted node simply closes
+  // the panel.
   const inspecting =
     nodes.find((node) => node.id === inspectingId && node.data.kind === "tool") ??
     null;
+  const inspectingTrigger = nodes.some(
+    (node) => node.id === inspectingId && node.data.kind === "trigger",
+  );
 
   const inspectingServer = inspecting
     ? connections.find((server) => server.slug === inspecting.data.serverSlug)
@@ -205,7 +215,9 @@ export function WorkflowCanvas({
           setMenu(null);
           // Clicking a node that cannot be configured closes the panel rather
           // than leaving it showing the previous selection.
-          setInspectingId(node.data.kind === "tool" ? node.id : null);
+          setInspectingId(
+            node.data.kind === "tool" || node.data.kind === "trigger" ? node.id : null,
+          );
         }}
         onPaneClick={() => setMenu(null)}
         onPaneContextMenu={(event) => {
@@ -280,6 +292,10 @@ export function WorkflowCanvas({
           onClose={() => setInspectingId(null)}
         />
       ) : null}
+
+      {inspectingTrigger && renderTriggerInspector
+        ? renderTriggerInspector(() => setInspectingId(null))
+        : null}
     </div>
   );
 }

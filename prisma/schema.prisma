@@ -211,6 +211,8 @@ enum WorkflowTrigger {
   MANUAL
   SCHEDULE
   WEBHOOK
+  /// Fires once at `runAt`, then the worker switches the workflow off.
+  ONCE
 }
 
 enum RunStatus {
@@ -273,8 +275,16 @@ model Workflow {
   /// the bug entirely, which is why it survives testing.
   timezone String?
 
+  /// The instant a ONCE workflow fires, in UTC. Null for every other trigger.
+  ///
+  /// Kept apart from `nextRunAt`, which the worker clears after the run: this
+  /// is what the user picked, so the studio can still show "ran at 14:00"
+  /// afterwards and re-enabling can tell them the time has passed. `timezone`
+  /// is stored alongside only to render it back in the zone it was chosen in.
+  runAt DateTime?
+
   /// When this workflow is next due, in UTC. Derived from `cron` + `timezone`
-  /// on save and recomputed after each run.
+  /// (or `runAt`) on save and recomputed after each run.
   ///
   /// This is what makes a scheduler affordable: the runner selects on an index
   /// rather than evaluating every cron expression on every tick.

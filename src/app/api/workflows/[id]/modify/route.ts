@@ -102,6 +102,7 @@ export async function POST(
         trigger: workflow.trigger,
         cron: workflow.cron,
         timezone: workflow.timezone,
+        runAt: workflow.runAt?.toISOString() ?? null,
       },
     });
 
@@ -112,13 +113,22 @@ export async function POST(
     const latestInstruction =
       messages.find((message) => message.role === "user")?.content ??
       "Updated with AI";
+    // The model cannot write a one-time trigger, so a MANUAL answer for a
+    // ONCE workflow means "not asked to change the schedule". Writing it back
+    // would silently cancel a send the user set up in the studio.
+    const keepSchedule =
+      workflow.trigger === "ONCE" && result.draft.trigger === "MANUAL";
     const updated = await updateWorkflow(user.id, workflow.id, {
       name: result.draft.name.slice(0, 120),
       description: result.draft.description.slice(0, 2000),
       graph: result.draft.graph,
-      trigger: result.draft.trigger,
-      cron: result.draft.cron,
-      timezone: result.draft.timezone,
+      ...(keepSchedule
+        ? {}
+        : {
+            trigger: result.draft.trigger,
+            cron: result.draft.cron,
+            timezone: result.draft.timezone,
+          }),
       versionNote: `AI edit: ${latestInstruction.slice(0, 100)}`,
     });
     if (!updated) {
@@ -132,8 +142,12 @@ export async function POST(
         name: updated.name,
         description: updated.description,
         trigger: updated.trigger,
+        isEnabled: updated.isEnabled,
         cron: updated.cron,
         timezone: updated.timezone,
+        runAt: updated.runAt?.toISOString() ?? null,
+        nextRunAt: updated.nextRunAt?.toISOString() ?? null,
+        lastRunAt: updated.lastRunAt?.toISOString() ?? null,
         graph: updated.graph,
         updatedAt: updated.updatedAt.toISOString(),
       },

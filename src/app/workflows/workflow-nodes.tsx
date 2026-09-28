@@ -1,19 +1,35 @@
 "use client";
 
+import { useContext } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { FlowNode } from "@/lib/workflows/flow";
 import { isUnconfiguredTool } from "@/lib/workflows/graph";
+import { ScheduleContext, summarizeSchedule } from "./schedule-context";
 
 const shell =
   "min-w-[180px] rounded-xl border bg-white px-3 py-2 shadow-sm dark:bg-neutral-950";
 
 export function TriggerNode({ data }: NodeProps<FlowNode>) {
+  const schedule = useContext(ScheduleContext);
+  const summary = schedule ? summarizeSchedule(schedule) : null;
+
   return (
     <div className={`${shell} border-neutral-900 dark:border-[#ededed]`}>
       <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
         Trigger
       </p>
       <p className="text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+      {summary ? (
+        <p className="max-w-[220px] text-xs text-[#666] dark:text-[#999]">
+          {summary.text}
+          {/* Saved but switched off is the state that looks finished and
+              never fires, so it is called out rather than left implied. */}
+          {summary.off ? (
+            <span className="text-amber-700 dark:text-amber-500"> · Off</span>
+          ) : null}
+        </p>
+      ) : null}
+      <p className="text-[10px] text-[#999] dark:text-[#666]">Click to schedule</p>
       <Handle
         type="source"
         position={Position.Right}

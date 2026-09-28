@@ -107,6 +107,10 @@ type DueWorkflow struct {
 // nextRunAt is advanced whether the run later passes or fails, because a
 // workflow that fails at 09:00 should next be considered at its next slot,
 // not retried on every tick for the rest of the day.
+//
+// A ONCE workflow is also switched off in the same statement. Clearing
+// nextRunAt alone would stop it firing again, but it would still read as
+// "on" in the studio with nothing left to do.
 func (s *Store) EnqueueDue(
 	ctx context.Context,
 	now time.Time,
@@ -153,18 +157,25 @@ func (s *Store) EnqueueDue(
 
 		if _, err := tx.Exec(ctx, `
 			UPDATE "Workflow"
-			SET "lastRunAt" = $2::timestamp, "nextRunAt" = $3::timestamp
+			SET "lastRunAt" = $2::timestamp, "nextRunAt" = $3::timestamp,
+				"isEnabled" = "isEnabled" AND trigger <> 'ONCE'
 			WHERE id = $1`,
 			w.ID, ts(now), next,
 		); err != nil {
 			return 0, err
 		}
 
+		// Recorded as ONCE or SCHEDULE, whichever fired it, so run history
+		// can tell a one-off send from a recurring one.
+		runTrigger := "SCHEDULE"
+		if w.Trigger == "ONCE" {
+			runTrigger = "ONCE"
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO "WorkflowRun"
 				(id, "workflowId", status, trigger, "graphSnapshot", "graphVersion", "dryRun", "createdAt")
-			VALUES ($1, $2, 'QUEUED', 'SCHEDULE', $3::jsonb, $4, false, $5::timestamp)`,
-			cuid.New(), w.ID, w.Graph, w.Version, ts(now),
+			VALUES ($1, $2, 'QUEUED', $6::"WorkflowTrigger", $3::jsonb, $4, false, $5::timestamp)`,
+			cuid.New(), w.ID, w.Graph, w.Version, ts(now), runTrigger,
 		); err != nil {
 			return 0, err
 		}

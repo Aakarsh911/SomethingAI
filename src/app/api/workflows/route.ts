@@ -14,6 +14,7 @@ function serializeSummary(workflow: Awaited<ReturnType<typeof listWorkflows>>[nu
     isEnabled: workflow.isEnabled,
     cron: workflow.cron,
     timezone: workflow.timezone,
+    runAt: workflow.runAt?.toISOString() ?? null,
     nextRunAt: workflow.nextRunAt?.toISOString() ?? null,
     lastRunAt: workflow.lastRunAt?.toISOString() ?? null,
     serverSlugs: workflow.serverSlugs,
@@ -68,7 +69,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const trigger = body.trigger === "SCHEDULE" ? "SCHEDULE" : "MANUAL";
+  const trigger =
+    body.trigger === "SCHEDULE" || body.trigger === "ONCE" ? body.trigger : "MANUAL";
 
   try {
     const workflow = await createWorkflow(user.id, {
@@ -81,6 +83,7 @@ export async function POST(request: Request) {
       trigger,
       cron: typeof body.cron === "string" ? body.cron : null,
       timezone: typeof body.timezone === "string" ? body.timezone : null,
+      runAt: typeof body.runAt === "string" ? new Date(body.runAt) : null,
       // Always saved off. Enabling is a separate, deliberate act — a workflow
       // generated from one sentence should not start firing on a schedule
       // before anyone has looked at it.

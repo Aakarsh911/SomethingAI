@@ -100,7 +100,7 @@ func (r *Runner) schedule(ctx context.Context) {
 	now := time.Now()
 	n, err := r.store.EnqueueDue(ctx, now, 100, func(w store.DueWorkflow) *time.Time {
 		// A workflow that is no longer on a schedule keeps no slot, so it is
-		// not picked up again.
+		// not picked up again. That includes ONCE: its one slot is this one.
 		if w.Trigger != "SCHEDULE" || w.Cron == nil || w.Timezone == nil {
 			return nil
 		}

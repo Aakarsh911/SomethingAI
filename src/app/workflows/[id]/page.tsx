@@ -47,6 +47,15 @@ export default async function WorkflowPage({
         description: selected.description,
         updatedAt: selected.updatedAt.toISOString(),
         graph: parsed.data,
+        schedule: {
+          trigger: selected.trigger,
+          isEnabled: selected.isEnabled,
+          cron: selected.cron,
+          timezone: selected.timezone,
+          runAt: selected.runAt?.toISOString() ?? null,
+          nextRunAt: selected.nextRunAt?.toISOString() ?? null,
+          lastRunAt: selected.lastRunAt?.toISOString() ?? null,
+        },
       }}
       versions={versions.map((version) => ({
         id: version.id,

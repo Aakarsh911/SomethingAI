@@ -7,6 +7,12 @@ import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { McpServerView } from "@/lib/mcp/servers";
 import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
+import {
+  ScheduleContext,
+  pickSchedule,
+  type WorkflowSchedule,
+} from "./schedule-context";
+import { ScheduleInspector, type SchedulePatch } from "./schedule-inspector";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -25,6 +31,7 @@ export type WorkflowVersionItem = {
 export type WorkflowDetail = WorkflowListItem & {
   description: string | null;
   graph: WorkflowGraph;
+  schedule: WorkflowSchedule;
 };
 
 type RunSummary = {
@@ -87,6 +94,9 @@ function StudioInner({
   const [nameDraft, setNameDraft] = useState("");
   const [displayName, setDisplayName] = useState(selected?.name ?? "");
   const [graph, setGraph] = useState<WorkflowGraph | null>(selected?.graph ?? null);
+  const [schedule, setSchedule] = useState<WorkflowSchedule | null>(
+    selected?.schedule ?? null,
+  );
   const [localVersions, setLocalVersions] = useState(versions);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +196,33 @@ function StudioInner({
     }, 800);
   }
 
+  /** Resolves to an error message for the panel, or null once saved. */
+  async function saveSchedule(patch: SchedulePatch): Promise<string | null> {
+    if (!selected) return "No workflow selected.";
+
+    try {
+      const response = await fetch(`/api/workflows/${selected.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const body = (await response.json().catch(() => null)) as {
+        workflow?: WorkflowSchedule;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !body?.workflow) {
+        return body?.error ?? "Could not save the schedule.";
+      }
+
+      setSchedule(pickSchedule(body.workflow));
+      router.refresh();
+      return null;
+    } catch {
+      return "Could not reach the server.";
+    }
+  }
+
   async function restore(revision: number) {
     if (!selected) return;
     setError(null);
@@ -252,7 +289,7 @@ function StudioInner({
         }),
       });
       const body = (await response.json().catch(() => null)) as {
-        workflow?: {
+        workflow?: WorkflowSchedule & {
           name: string;
           graph: WorkflowGraph;
         };
@@ -283,6 +320,8 @@ function StudioInner({
       setGraph(body.workflow.graph);
       setCanvasKey((value) => value + 1);
       setDisplayName(body.workflow.name);
+      // An edit like "run it every Monday instead" changes the schedule too.
+      setSchedule(pickSchedule(body.workflow));
       lastSaved.current = stableStringify(body.workflow.graph);
       if (body.versions) setLocalVersions(body.versions);
       setModificationMessages([]);
@@ -572,12 +611,25 @@ function StudioInner({
 
             <div className="relative min-h-0 flex-1">
               <ReactFlowProvider>
-                <WorkflowCanvas
-                  key={canvasKey}
-                  graph={graph}
-                  connections={connections}
-                  onChange={queueSave}
-                />
+                <ScheduleContext.Provider value={schedule}>
+                  <WorkflowCanvas
+                    key={canvasKey}
+                    graph={graph}
+                    connections={connections}
+                    onChange={queueSave}
+                    renderTriggerInspector={
+                      schedule
+                        ? (onClose) => (
+                            <ScheduleInspector
+                              schedule={schedule}
+                              onSave={saveSchedule}
+                              onClose={onClose}
+                            />
+                          )
+                        : undefined
+                    }
+                  />
+                </ScheduleContext.Provider>
               </ReactFlowProvider>
               {modifying ? (
                 <div

@@ -1,5 +1,6 @@
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import { parseGraph } from "@/lib/workflows/graph";
+import { ScheduleError } from "@/lib/workflows/schedule";
 import {
   deleteWorkflow,
   getWorkflow,
@@ -16,6 +17,11 @@ function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>
     description: workflow.description,
     trigger: workflow.trigger,
     isEnabled: workflow.isEnabled,
+    cron: workflow.cron,
+    timezone: workflow.timezone,
+    runAt: workflow.runAt?.toISOString() ?? null,
+    nextRunAt: workflow.nextRunAt?.toISOString() ?? null,
+    lastRunAt: workflow.lastRunAt?.toISOString() ?? null,
     serverSlugs: workflow.serverSlugs,
     graphVersion: workflow.graphVersion,
     graph: workflow.graph,
@@ -95,7 +101,48 @@ export async function PATCH(
     }
   }
 
-  const workflow = await updateWorkflow(user.id, id, input);
+  if (body.trigger !== undefined) {
+    if (
+      body.trigger !== "MANUAL" &&
+      body.trigger !== "SCHEDULE" &&
+      body.trigger !== "ONCE"
+    ) {
+      return Response.json(
+        { error: "Trigger must be MANUAL, SCHEDULE or ONCE." },
+        { status: 400 },
+      );
+    }
+    input.trigger = body.trigger;
+  }
+  if (body.cron !== undefined) {
+    input.cron = typeof body.cron === "string" && body.cron.trim() ? body.cron.trim() : null;
+  }
+  if (body.timezone !== undefined) {
+    input.timezone =
+      typeof body.timezone === "string" && body.timezone.trim() ? body.timezone.trim() : null;
+  }
+  if (body.runAt !== undefined) {
+    // An ISO instant from the browser, already converted out of local time
+    // there. Validity and "not in the past" are checked by the store.
+    input.runAt = typeof body.runAt === "string" ? new Date(body.runAt) : null;
+  }
+  if (body.isEnabled !== undefined) {
+    if (typeof body.isEnabled !== "boolean") {
+      return Response.json({ error: "isEnabled must be a boolean." }, { status: 400 });
+    }
+    input.isEnabled = body.isEnabled;
+  }
+
+  let workflow;
+  try {
+    workflow = await updateWorkflow(user.id, id, input);
+  } catch (error) {
+    // A bad cron, a past run time or an unknown zone is the caller's to fix.
+    if (error instanceof ScheduleError) {
+      return Response.json({ error: error.message }, { status: 422 });
+    }
+    throw error;
+  }
   if (!workflow) {
     return Response.json({ error: "Workflow not found." }, { status: 404 });
   }

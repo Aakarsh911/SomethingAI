@@ -156,9 +156,14 @@ export type ExistingWorkflowContext = {
   name: string;
   description: string | null;
   graph: WorkflowGraph;
-  trigger: "MANUAL" | "SCHEDULE";
+  /**
+   * ONCE is shown to the model for context but is not something it can
+   * produce; the modify route keeps it when the answer comes back MANUAL.
+   */
+  trigger: "MANUAL" | "SCHEDULE" | "ONCE";
   cron: string | null;
   timezone: string | null;
+  runAt: string | null;
 };
 
 function systemPrompt(
