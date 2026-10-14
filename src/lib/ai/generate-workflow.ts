@@ -6,7 +6,13 @@ import {
   parseGraph,
   type WorkflowGraph,
 } from "@/lib/workflows/graph";
-import { assertValidSchedule, describeSchedule } from "@/lib/workflows/schedule";
+import {
+  GENERATED_TRIGGERS,
+  assertValidSchedule,
+  describeSchedule,
+  type GeneratedTrigger,
+  type UserTrigger,
+} from "@/lib/workflows/schedule";
 import {
   reconcileToolInputs,
   renderToolsForPrompt,
@@ -90,7 +96,7 @@ const questionSchema = z.object({
 const planSchema = z.object({
   name: z.string(),
   description: z.string(),
-  trigger: z.enum(["MANUAL", "SCHEDULE"]),
+  trigger: z.enum(GENERATED_TRIGGERS),
   cron: z
     .string()
     .nullable()
@@ -117,7 +123,7 @@ export type WorkflowDraft = {
   name: string;
   description: string;
   graph: WorkflowGraph;
-  trigger: "MANUAL" | "SCHEDULE";
+  trigger: GeneratedTrigger;
   cron: string | null;
   timezone: string | null;
   /** Rendered schedule for the confirmation screen, e.g. "Every Thursday at 09:00". */
@@ -156,11 +162,8 @@ export type ExistingWorkflowContext = {
   name: string;
   description: string | null;
   graph: WorkflowGraph;
-  /**
-   * ONCE is shown to the model for context but is not something it can
-   * produce; the modify route keeps it when the answer comes back MANUAL.
-   */
-  trigger: "MANUAL" | "SCHEDULE" | "ONCE";
+  /** Wider than GeneratedTrigger: ONCE is shown to the model for context. */
+  trigger: UserTrigger;
   cron: string | null;
   timezone: string | null;
   runAt: string | null;
@@ -418,7 +421,10 @@ function planToGraph(
       // tool's real input schema before the graph is built.
       const tool = byKey.get(`${step.serverSlug}:${step.toolSlug}`);
       if (tool) {
-        const reconciled = reconcileToolInputs(inputs, tool.parameters);
+        const reconciled = reconcileToolInputs(
+          inputs,
+          tool.schema.map((parameter) => parameter.name),
+        );
         inputs = reconciled.inputs;
         droppedArgs.push(
           ...reconciled.dropped.map((key) => `${step.toolSlug}.${key}`),

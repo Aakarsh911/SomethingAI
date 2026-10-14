@@ -8,12 +8,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Queues a workflow for the worker and answers with the finished run.
- *
- * The response waits for the result rather than returning a promise of one.
- * That keeps "Run now" honest — the button cannot report success for
- * something that has not happened yet. A run that outlasts the wait answers
- * 202 and carries on; its outcome lands in run history.
+ * Queues a run and waits for the worker to finish it, so "Run now" reports
+ * what actually happened. A run that outlasts the wait answers 202 and keeps
+ * going; its result lands in run history.
  */
 export async function POST(
   request: Request,

@@ -1,6 +1,6 @@
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import { emptyGraph, parseGraph } from "@/lib/workflows/graph";
-import { ScheduleError } from "@/lib/workflows/schedule";
+import { ScheduleError, isUserTrigger } from "@/lib/workflows/schedule";
 import { createWorkflow, listWorkflows } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +69,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const trigger =
-    body.trigger === "SCHEDULE" || body.trigger === "ONCE" ? body.trigger : "MANUAL";
+  const trigger = isUserTrigger(body.trigger) ? body.trigger : "MANUAL";
 
   try {
     const workflow = await createWorkflow(user.id, {

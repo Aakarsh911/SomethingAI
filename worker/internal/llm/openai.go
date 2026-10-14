@@ -17,10 +17,8 @@ const defaultBaseURL = "https://api.openai.com/v1"
 
 const systemPrompt = "You transform data inside an automation workflow. Follow the instruction exactly and reply with the result only — no preamble, no commentary, no markdown fences."
 
-// maxInputChars bounds the previous step's output before it reaches the
-// model. A Gmail fetch returns far more than a summary needs, and an
-// unbounded blob is both the slowest and the most expensive way to get a
-// worse answer.
+// maxInputChars caps the previous step's output sent to the model; a Gmail
+// fetch is far larger than a summary needs.
 const maxInputChars = 100_000
 
 type Client struct {
@@ -42,8 +40,9 @@ func New(apiKey, baseURL, model string) *Client {
 	}
 }
 
-// Transform applies instruction to input and returns the model's text.
-func (c *Client) Transform(ctx context.Context, instruction string, input any) (string, error) {
+// Transform applies instruction to input (the previous step's output, as
+// text) and returns the model's reply.
+func (c *Client) Transform(ctx context.Context, instruction, input string) (string, error) {
 	if c.apiKey == "" {
 		return "", errors.New("OPENAI_API_KEY is not set, so model steps cannot run.")
 	}
@@ -99,8 +98,7 @@ func (c *Client) Transform(ctx context.Context, instruction string, input any) (
 		return "", fmt.Errorf("model step: OpenAI answered %s", resp.Status)
 	}
 
-	// The SDKs' output_text convenience, done by hand: every text part of
-	// every message item, in order.
+	// The SDKs' output_text, by hand: every text part of every message.
 	var text strings.Builder
 	for _, item := range body.Output {
 		if item.Type != "message" {
@@ -115,21 +113,9 @@ func (c *Client) Transform(ctx context.Context, instruction string, input any) (
 	return text.String(), nil
 }
 
-func renderInput(input any) string {
-	if input == nil {
+func renderInput(text string) string {
+	if text == "" {
 		return "(no input)"
-	}
-	text, ok := input.(string)
-	if !ok {
-		var buf bytes.Buffer
-		encoder := json.NewEncoder(&buf)
-		encoder.SetEscapeHTML(false)
-		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(input); err != nil {
-			text = fmt.Sprint(input)
-		} else {
-			text = strings.TrimSuffix(buf.String(), "\n")
-		}
 	}
 	if len(text) > maxInputChars {
 		cut := maxInputChars

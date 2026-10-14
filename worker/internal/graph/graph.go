@@ -1,11 +1,7 @@
-// Package graph decodes the workflow graph blob stored in Workflow.graph and
-// WorkflowRun.graphSnapshot.
-//
-// The Zod schema in src/lib/workflows/graph.ts is the source of truth and
-// every write path goes through it, so this package does not try to be a
-// second validator. It checks only what the engine would otherwise trip over
-// mid-run: unknown node kinds, dangling edges, duplicate ids, and the trigger
-// count.
+// Package graph decodes the stored workflow graph. The Zod schema in
+// src/lib/workflows/graph.ts is the real validator; this checks only what
+// would break the engine mid-run (unknown kinds, dangling edges, duplicate
+// ids, trigger count).
 package graph
 
 import (
@@ -14,8 +10,7 @@ import (
 	"fmt"
 )
 
-// UnconfiguredTool mirrors UNCONFIGURED_TOOL in graph.ts: the tool slug of a
-// node placed on the canvas but never given a tool.
+// UnconfiguredTool mirrors UNCONFIGURED_TOOL in graph.ts.
 const UnconfiguredTool = "__unconfigured__"
 
 func IsUnconfiguredTool(toolSlug string) bool {
@@ -69,10 +64,8 @@ type Graph struct {
 	Edges []Edge `json:"edges"`
 }
 
-// Parse decodes and checks a stored graph.
-//
-// Numbers are kept as json.Number so an id like 12345678901234567 in a tool
-// argument reaches the tool intact instead of being rounded through float64.
+// Parse decodes and checks a stored graph. Numbers stay json.Number so large
+// ids reach tools without float64 rounding.
 func Parse(raw []byte) (*Graph, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()

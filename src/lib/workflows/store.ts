@@ -74,10 +74,7 @@ export type WorkflowInput = {
   cron?: string | null;
   /** Required when trigger is ONCE, ignored otherwise. */
   runAt?: Date | null;
-  /**
-   * IANA zone the cron is read in, or the one-off time is shown in. Required
-   * alongside `cron` or `runAt`.
-   */
+  /** IANA zone for `cron` or `runAt`; required with either. */
   timezone?: string | null;
   versionNote?: string | null;
 };
@@ -142,6 +139,20 @@ export function listVersions(
     select: { id: true, revision: true, note: true, createdAt: true },
     orderBy: { revision: "desc" },
   });
+}
+
+/** A version as the studio receives it. */
+export type WorkflowVersionView = Omit<WorkflowVersionSummary, "createdAt"> & {
+  createdAt: string;
+};
+
+export function versionView(version: WorkflowVersionSummary): WorkflowVersionView {
+  return {
+    id: version.id,
+    revision: version.revision,
+    note: version.note,
+    createdAt: version.createdAt.toISOString(),
+  };
 }
 
 export function getVersion(userId: string, workflowId: string, revision: number) {
@@ -317,13 +328,9 @@ export function workflowsUsingServer(
 }
 
 /**
- * Queues a run for the Go worker (worker/) and snapshots the graph as it
- * stands right now.
- *
- * The app never executes a workflow itself; inserting a QUEUED row is the
- * whole handoff. The snapshot is the other point of this function: without
- * it, editing a workflow silently rewrites what every earlier run appears to
- * have done.
+ * Queues a run for the Go worker (worker/); the QUEUED row is the whole
+ * handoff. The graph is snapshotted so later edits do not rewrite what this
+ * run did.
  */
 export async function enqueueRun(
   userId: string,

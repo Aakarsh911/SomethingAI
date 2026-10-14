@@ -1,4 +1,5 @@
 import { CronExpressionParser } from "cron-parser";
+import type { WorkflowTrigger } from "@/generated/prisma/enums";
 
 /**
  * Turning a cron expression plus an IANA zone into the next UTC instant.
@@ -67,11 +68,8 @@ export function nextRunAt(
 }
 
 /**
- * Validates a one-off run time.
- *
- * A time already in the past is refused rather than accepted: the scheduler
- * would treat it as overdue and fire it on its next tick, which for a
- * workflow that sends email is the worst possible reading of a typo.
+ * Validates a one-off run time. A past time is refused, since the scheduler
+ * would treat it as overdue and fire it straight away.
  */
 export function assertValidRunAt(
   runAt: Date,
@@ -89,7 +87,51 @@ export function assertValidRunAt(
   }
 }
 
-/** "Once on Fri, Oct 3 at 14:00 (America/New_York)". */
+/** The triggers a user can choose in the studio. WEBHOOK is not one yet. */
+export const USER_TRIGGERS = ["MANUAL", "SCHEDULE", "ONCE"] as const satisfies readonly WorkflowTrigger[];
+export type UserTrigger = (typeof USER_TRIGGERS)[number];
+
+/** The triggers the AI builder can write. It never asks for a date, so no ONCE. */
+export const GENERATED_TRIGGERS = ["MANUAL", "SCHEDULE"] as const satisfies readonly UserTrigger[];
+export type GeneratedTrigger = (typeof GENERATED_TRIGGERS)[number];
+
+export function isUserTrigger(value: unknown): value is UserTrigger {
+  return (USER_TRIGGERS as readonly unknown[]).includes(value);
+}
+
+/** A workflow's schedule columns as the studio receives them. */
+export type WorkflowSchedule = {
+  trigger: WorkflowTrigger;
+  isEnabled: boolean;
+  cron: string | null;
+  timezone: string | null;
+  /** ISO instants. */
+  runAt: string | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+};
+
+export function scheduleView(workflow: {
+  trigger: WorkflowSchedule["trigger"];
+  isEnabled: boolean;
+  cron: string | null;
+  timezone: string | null;
+  runAt: Date | null;
+  nextRunAt: Date | null;
+  lastRunAt: Date | null;
+}): WorkflowSchedule {
+  return {
+    trigger: workflow.trigger,
+    isEnabled: workflow.isEnabled,
+    cron: workflow.cron,
+    timezone: workflow.timezone,
+    runAt: workflow.runAt?.toISOString() ?? null,
+    nextRunAt: workflow.nextRunAt?.toISOString() ?? null,
+    lastRunAt: workflow.lastRunAt?.toISOString() ?? null,
+  };
+}
+
+/** "Fri, Oct 3 at 14:00 (America/New_York)". */
 export function describeRunAt(runAt: Date, timezone: string): string {
   const when = runAt.toLocaleString("en-US", {
     timeZone: timezone,
@@ -101,49 +143,109 @@ export function describeRunAt(runAt: Date, timezone: string): string {
     minute: "2-digit",
     hourCycle: "h23",
   });
-  // toLocaleString joins the date and time with a comma; "at" reads better
-  // and matches describeSchedule.
-  return `Once on ${when.replace(/, (\d\d:\d\d)$/, " at $1")} (${timezone})`;
+  return `${when.replace(/, (\d\d:\d\d)$/, " at $1")} (${timezone})`;
 }
 
 /**
- * Human-readable rendering of a schedule, for confirming a generated workflow
- * before it is saved.
- *
- * Only patterns it can state exactly are put into words. Anything else is
- * labelled as a custom schedule with the raw expression, rather than guessed
- * at: a confidently wrong description of when something will run is worse
- * than an honest "custom".
+ * A cron expression in one of the shapes the schedule panel offers. Fields a
+ * shape does not use keep a default, so switching shapes keeps the time.
  */
-export function describeSchedule(cron: string, timezone: string): string {
-  const custom = `Custom schedule: ${cron} (${timezone})`;
+export type SimpleCron = {
+  repeat: "hourly" | "daily" | "weekdays" | "days" | "monthly";
+  minute: number;
+  hour: number;
+  /** Cron day numbers, 0 = Sunday. */
+  days: number[];
+  dayOfMonth: number;
+};
+
+export const DEFAULT_CRON: SimpleCron = {
+  repeat: "daily",
+  minute: 0,
+  hour: 9,
+  days: [1],
+  dayOfMonth: 1,
+};
+
+/** Null for anything the panel cannot represent, which it keeps as custom. */
+export function parseSimpleCron(cron: string): SimpleCron | null {
   const fields = cron.trim().split(/\s+/);
-  if (fields.length !== 5) return custom;
+  if (fields.length !== 5) return null;
+  const [min, hr, dom, month, dow] = fields;
 
-  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
-  const numeric = /^\d+$/;
-  if (!numeric.test(minute) || month !== "*") return custom;
+  const inRange = (value: string, low: number, high: number) =>
+    /^\d{1,2}$/.test(value) && Number(value) >= low && Number(value) <= high
+      ? Number(value)
+      : null;
 
-  if (hour === "*") {
-    return dayOfMonth === "*" && dayOfWeek === "*"
-      ? `Every hour at :${minute.padStart(2, "0")} (${timezone})`
-      : custom;
+  const minute = inRange(min, 0, 59);
+  if (minute === null || month !== "*") return null;
+  if (hr === "*") {
+    return dom === "*" && dow === "*" ? { ...DEFAULT_CRON, repeat: "hourly", minute } : null;
   }
-  if (!numeric.test(hour)) return custom;
 
-  const at = `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`;
+  const hour = inRange(hr, 0, 23);
+  if (hour === null) return null;
+  const base = { ...DEFAULT_CRON, minute, hour };
 
-  if (numeric.test(dayOfMonth) && dayOfWeek === "*") {
-    return `Every month on the ${ordinal(Number(dayOfMonth))} at ${at} (${timezone})`;
+  if (dom !== "*") {
+    const dayOfMonth = inRange(dom, 1, 31);
+    return dayOfMonth !== null && dow === "*"
+      ? { ...base, repeat: "monthly", dayOfMonth }
+      : null;
   }
-  if (dayOfMonth !== "*") return custom;
+  if (dow === "*") return { ...base, repeat: "daily" };
+  if (dow === "1-5") return { ...base, repeat: "weekdays" };
 
-  if (dayOfWeek === "*") return `Every day at ${at} (${timezone})`;
-  if (dayOfWeek === "1-5") return `Every weekday at ${at} (${timezone})`;
+  // A plain list like "1,3,5"; 7 is cron's second spelling of Sunday.
+  if (!/^[0-7](,[0-7])*$/.test(dow)) return null;
+  const days = [...new Set(dow.split(",").map((day) => Number(day) % 7))];
+  return { ...base, repeat: "days", days };
+}
 
-  const days = parseDayList(dayOfWeek);
-  if (!days) return custom;
-  return `Every ${joinWords(days.map((day) => DAY_NAMES[day]))} at ${at} (${timezone})`;
+export function buildCron(cron: SimpleCron): string {
+  const { minute, hour } = cron;
+  switch (cron.repeat) {
+    case "hourly":
+      return `${minute} * * * *`;
+    case "daily":
+      return `${minute} ${hour} * * *`;
+    case "weekdays":
+      return `${minute} ${hour} * * 1-5`;
+    case "days":
+      return `${minute} ${hour} * * ${cron.days.join(",")}`;
+    case "monthly":
+      return `${minute} ${hour} ${cron.dayOfMonth} * *`;
+  }
+}
+
+/** A schedule in words, or the raw expression when it is not a simple shape. */
+export function describeSchedule(cron: string, timezone: string): string {
+  const simple = parseSimpleCron(cron);
+  if (!simple) return `Custom schedule: ${cron} (${timezone})`;
+
+  return `${describeSimpleCron(simple)} (${timezone})`;
+}
+
+function describeSimpleCron(cron: SimpleCron): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const at = `${pad(cron.hour)}:${pad(cron.minute)}`;
+
+  switch (cron.repeat) {
+    case "hourly":
+      return `Every hour at :${pad(cron.minute)}`;
+    case "daily":
+      return `Every day at ${at}`;
+    case "weekdays":
+      return `Every weekday at ${at}`;
+    case "days": {
+      // Listed Monday first, the way people read a week.
+      const week = [...cron.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
+      return `Every ${joinWords(week.map((day) => DAY_NAMES[day]))} at ${at}`;
+    }
+    case "monthly":
+      return `Every month on the ${ordinal(cron.dayOfMonth)} at ${at}`;
+  }
 }
 
 export const DAY_NAMES = [
@@ -155,17 +257,6 @@ export const DAY_NAMES = [
   "Friday",
   "Saturday",
 ];
-
-/**
- * "1,3,5" to [1, 3, 5], sorted Monday-first the way people list a week.
- * Null for ranges, steps or anything else not a plain list of days.
- */
-export function parseDayList(field: string): number[] | null {
-  if (!/^[0-7](,[0-7])*$/.test(field)) return null;
-  // Cron allows 7 as a second spelling of Sunday.
-  const days = [...new Set(field.split(",").map((day) => Number(day) % 7))];
-  return days.sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
-}
 
 function joinWords(words: string[]): string {
   if (words.length <= 1) return words.join("");

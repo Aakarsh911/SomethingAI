@@ -1,14 +1,41 @@
+import { z } from "zod";
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import { parseGraph } from "@/lib/workflows/graph";
-import { ScheduleError } from "@/lib/workflows/schedule";
+import {
+  ScheduleError,
+  USER_TRIGGERS,
+  scheduleView,
+} from "@/lib/workflows/schedule";
 import {
   deleteWorkflow,
   getWorkflow,
   listVersions,
   updateWorkflow,
+  versionView,
 } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
+
+/** Blank text means "clear it". */
+const optionalText = z
+  .string()
+  .trim()
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
+
+/** Validity of the cron, zone and run time is checked by the store. */
+const schedulePatch = z.object({
+  trigger: z.enum(USER_TRIGGERS).optional(),
+  cron: optionalText,
+  timezone: optionalText,
+  runAt: z.iso
+    .datetime()
+    .transform((value) => new Date(value))
+    .nullable()
+    .optional(),
+  isEnabled: z.boolean().optional(),
+});
 
 function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>>) {
   return {
@@ -17,11 +44,7 @@ function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>
     description: workflow.description,
     trigger: workflow.trigger,
     isEnabled: workflow.isEnabled,
-    cron: workflow.cron,
-    timezone: workflow.timezone,
-    runAt: workflow.runAt?.toISOString() ?? null,
-    nextRunAt: workflow.nextRunAt?.toISOString() ?? null,
-    lastRunAt: workflow.lastRunAt?.toISOString() ?? null,
+    schedule: scheduleView(workflow),
     serverSlugs: workflow.serverSlugs,
     graphVersion: workflow.graphVersion,
     graph: workflow.graph,
@@ -46,12 +69,7 @@ export async function GET(
   const versions = await listVersions(user.id, id);
   return Response.json({
     workflow: serialize(workflow),
-    versions: versions.map((version) => ({
-      id: version.id,
-      revision: version.revision,
-      note: version.note,
-      createdAt: version.createdAt.toISOString(),
-    })),
+    versions: versions.map(versionView),
   });
 }
 
@@ -101,41 +119,17 @@ export async function PATCH(
     }
   }
 
-  if (body.trigger !== undefined) {
-    if (
-      body.trigger !== "MANUAL" &&
-      body.trigger !== "SCHEDULE" &&
-      body.trigger !== "ONCE"
-    ) {
-      return Response.json(
-        { error: "Trigger must be MANUAL, SCHEDULE or ONCE." },
-        { status: 400 },
-      );
-    }
-    input.trigger = body.trigger;
-  }
-  if (body.cron !== undefined) {
-    input.cron = typeof body.cron === "string" && body.cron.trim() ? body.cron.trim() : null;
-  }
-  if (body.timezone !== undefined) {
-    input.timezone =
-      typeof body.timezone === "string" && body.timezone.trim() ? body.timezone.trim() : null;
-  }
-  if (body.runAt !== undefined) {
-    // An ISO instant from the browser, already converted out of local time
-    // there. Validity and "not in the past" are checked by the store.
-    input.runAt = typeof body.runAt === "string" ? new Date(body.runAt) : null;
-  }
-  if (body.isEnabled !== undefined) {
-    if (typeof body.isEnabled !== "boolean") {
-      return Response.json({ error: "isEnabled must be a boolean." }, { status: 400 });
-    }
-    input.isEnabled = body.isEnabled;
+  const schedule = schedulePatch.safeParse(body);
+  if (!schedule.success) {
+    return Response.json(
+      { error: "The schedule is invalid.", issues: schedule.error.issues },
+      { status: 400 },
+    );
   }
 
   let workflow;
   try {
-    workflow = await updateWorkflow(user.id, id, input);
+    workflow = await updateWorkflow(user.id, id, { ...input, ...schedule.data });
   } catch (error) {
     // A bad cron, a past run time or an unknown zone is the caller's to fix.
     if (error instanceof ScheduleError) {
@@ -150,12 +144,7 @@ export async function PATCH(
   const versions = await listVersions(user.id, id);
   return Response.json({
     workflow: serialize(workflow),
-    versions: versions.map((version) => ({
-      id: version.id,
-      revision: version.revision,
-      note: version.note,
-      createdAt: version.createdAt.toISOString(),
-    })),
+    versions: versions.map(versionView),
   });
 }
 

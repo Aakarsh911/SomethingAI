@@ -1,10 +1,6 @@
-// Package schedule turns a cron expression plus an IANA zone into the next
-// UTC instant.
-//
-// The zone is applied at evaluation time rather than baked in as an offset,
-// so "0 9 * * 4" in America/New_York is 14:00Z in January and 13:00Z in July —
-// 09:00 local both times. src/lib/workflows/schedule.ts computes the first
-// nextRunAt when a workflow is saved; this computes every one after that.
+// Package schedule computes a cron expression's next run in an IANA zone, as
+// UTC. The zone is applied at evaluation, so 09:00 stays 09:00 across DST.
+// The app computes the first nextRunAt on save; the worker computes the rest.
 package schedule
 
 import (
@@ -18,8 +14,7 @@ var parser = cron.NewParser(
 	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
 )
 
-// Next returns the first time strictly after `after` that the schedule fires,
-// in UTC.
+// Next returns the first firing strictly after `after`, in UTC.
 func Next(expression, timezone string, after time.Time) (time.Time, error) {
 	location, err := time.LoadLocation(timezone)
 	if err != nil {

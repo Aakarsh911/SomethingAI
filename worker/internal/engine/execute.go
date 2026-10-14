@@ -1,9 +1,6 @@
-// Package engine walks a workflow graph and runs it.
-//
-// It knows nothing about Postgres, Composio or OpenAI: every side effect
-// arrives through Env. That is what makes a dry run a different Env rather
-// than a flag threaded through the traversal, and what lets the whole engine
-// be tested without a database or a network.
+// Package engine walks a workflow graph and runs it. Every side effect comes
+// through Env, so a dry run is just a different Env and the engine can be
+// tested without a database or network.
 package engine
 
 import (
@@ -51,10 +48,8 @@ type Env struct {
 	CallTool  func(ctx context.Context, call ToolCall) (any, error)
 	CallModel func(ctx context.Context, call ModelCall) (string, error)
 
-	// OnStep is called as each step settles, before the next one starts.
-	// Persisting per step rather than at the end is the difference between a
-	// crashed run you can read and one that left nothing behind. An error
-	// here fails the run.
+	// OnStep is called as each step settles, so a crashed run still leaves a
+	// readable log. An error here fails the run.
 	OnStep func(StepOutcome) error
 
 	Now func() time.Time
@@ -74,8 +69,7 @@ type Result struct {
 	Status RunStatus
 	Steps  []StepOutcome
 	Error  string
-	// Output of the last step that produced one, which is what a run
-	// "returns".
+	// Output of the last step that produced one.
 	Output any
 }
 
@@ -84,9 +78,8 @@ const DefaultMaxSteps = 50
 // ErrRunTimedOut is the message recorded when the run's context expires.
 const ErrRunTimedOut = "This run ran out of time before it finished."
 
-// Execute runs g to completion or first failure. The wall-clock cap for the
-// whole run is ctx's deadline; it is checked between steps and also cancels
-// whatever step is in flight.
+// Execute runs g to completion or the first failure. ctx's deadline caps the
+// whole run and also cancels the step in flight.
 func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 	now := env.Now
 	if now == nil {
@@ -115,8 +108,7 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 		}
 	}
 
-	// Keyed by node id so a later step can reach past its immediate
-	// predecessor, which is what {{steps.<id>.output}} is for.
+	// Steps is keyed by node id, for {{steps.<id>.output}}.
 	scope := Scope{Previous: nil, Steps: map[string]any{}}
 
 	fail := func(message string) Result {
@@ -139,8 +131,7 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 			return fail(ErrRunTimedOut)
 		}
 
-		// The trigger is an entry point, not work. It is not recorded as a
-		// step because there is no attempt to retry and no output to inspect.
+		// The trigger is an entry point, not work, so it is not a step.
 		if current.Kind != graph.KindTrigger {
 			outcome := runNode(ctx, current, env, now, scope)
 			steps = append(steps, outcome)
@@ -157,9 +148,8 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 				return fail(outcome.Error)
 			}
 
-			// A branch routes; it does not transform. Letting its empty
-			// output become Previous would hide the real data from the step
-			// after it — and from its own condition, which is evaluated next.
+			// A branch routes rather than transforms, so its empty output must
+			// not replace Previous, which its own condition reads next.
 			if current.Kind != graph.KindBranch {
 				scope.Steps[current.ID] = outcome.Output
 				scope.Previous = outcome.Output
@@ -198,8 +188,7 @@ func runNode(ctx context.Context, node *graph.Node, env Env, now func() time.Tim
 
 	switch node.Kind {
 	case graph.KindBranch:
-		// A branch decides where to go next; the decision is made in
-		// chooseNext. Recording it as a step keeps it visible in the run log.
+		// Decided in chooseNext; recorded so the branch shows in the run log.
 		return settle(StepSucceeded, node.Condition, nil, "")
 
 	case graph.KindLLM:
@@ -217,10 +206,8 @@ func runNode(ctx context.Context, node *graph.Node, env Env, now func() time.Tim
 		return settle(StepSucceeded, input, output, "")
 	}
 
-	// A node placed on the canvas but never given a tool. Named explicitly
-	// because the alternative is Composio rejecting the sentinel as an
-	// unknown slug, which reads as a Composio fault rather than an
-	// unfinished step.
+	// Caught here, or Composio would reject the sentinel slug and it would
+	// read as a Composio fault rather than an unfinished step.
 	if graph.IsUnconfiguredTool(node.ToolSlug) {
 		name := node.ServerSlug
 		if node.Label != nil {
@@ -270,8 +257,7 @@ func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node
 		if taken {
 			wanted = graph.WhenTrue
 		}
-		// "always" edges out of a branch fire whichever way it went; that is
-		// the only sensible reading of an edge that declares no side.
+		// An "always" edge out of a branch fires whichever way it went.
 		eligible = nil
 		for _, edge := range outgoing {
 			if edge.When == wanted || edge.When == graph.WhenAlways {
@@ -284,8 +270,7 @@ func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node
 	}
 
 	if len(eligible) > 1 {
-		// Running one arbitrarily would make the run silently wrong, and
-		// running both needs a merge rule this engine does not have yet.
+		// Picking one would be silently wrong; running both needs a merge rule.
 		return nil, fmt.Errorf("Step %q has %d outgoing paths. Parallel branches are not supported yet.", current.ID, len(eligible))
 	}
 
@@ -296,9 +281,8 @@ func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node
 	return node, nil
 }
 
-// describe turns a step error into the message recorded on the step. A step
-// cut short because the whole run expired says so, rather than surfacing
-// whatever the HTTP client made of the cancelled request.
+// describe turns a step error into its recorded message, reporting a run
+// timeout as such instead of as the cancelled HTTP request's error.
 func describe(ctx context.Context, err error) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return ErrRunTimedOut

@@ -22,8 +22,7 @@ export function TriggerNode({ data }: NodeProps<FlowNode>) {
       {summary ? (
         <p className="max-w-[220px] text-xs text-[#666] dark:text-[#999]">
           {summary.text}
-          {/* Saved but switched off is the state that looks finished and
-              never fires, so it is called out rather than left implied. */}
+          {/* Called out because a saved-but-off schedule looks finished. */}
           {summary.off ? (
             <span className="text-amber-700 dark:text-amber-500"> · Off</span>
           ) : null}
@@ -40,8 +39,7 @@ export function TriggerNode({ data }: NodeProps<FlowNode>) {
 }
 
 export function ToolNode({ data }: NodeProps<FlowNode>) {
-  // An unconfigured node is outlined rather than merely left blank: it looks
-  // finished otherwise, and the run only fails once it is reached.
+  // Outlined because it otherwise looks finished and fails only at run time.
   const unconfigured = isUnconfiguredTool(data.toolSlug);
 
   return (

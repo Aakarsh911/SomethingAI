@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -25,7 +25,9 @@ import {
   type FlowNodeData,
 } from "@/lib/workflows/flow";
 import { UNCONFIGURED_TOOL, type WorkflowGraph } from "@/lib/workflows/graph";
+import type { WorkflowSchedule } from "@/lib/workflows/schedule";
 import { NodeInspector } from "./node-inspector";
+import { ScheduleInspector, type SchedulePatch } from "./schedule-inspector";
 import { BranchNode, LlmNode, ToolNode, TriggerNode } from "./workflow-nodes";
 
 const nodeTypes = {
@@ -46,16 +48,15 @@ export function WorkflowCanvas({
   graph,
   connections,
   onChange,
-  renderTriggerInspector,
+  schedule,
+  onSaveSchedule,
 }: {
   graph: WorkflowGraph;
   connections: McpServerView[];
   onChange: (graph: WorkflowGraph) => void;
-  /**
-   * The trigger's panel edits the workflow's schedule, which lives on the
-   * workflow row rather than in the graph, so the studio supplies it.
-   */
-  renderTriggerInspector?: (onClose: () => void) => ReactNode;
+  /** Lives on the workflow row rather than in the graph, so it is passed in. */
+  schedule: WorkflowSchedule | null;
+  onSaveSchedule: (patch: SchedulePatch) => Promise<string | null>;
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const initial = graphToFlow(graph);
@@ -67,9 +68,7 @@ export function WorkflowCanvas({
   const [nodes, setNodes] = useState<FlowNode[]>(initial.nodes);
   const [edges, setEdges] = useState<FlowEdge[]>(initial.edges);
   const [menu, setMenu] = useState<MenuState | null>(null);
-  // The node whose inspector is open, by id rather than by value, so the
-  // panel reads the current node on every render instead of a snapshot taken
-  // when it was opened.
+  // By id, not value, so the panel always shows the current node.
   const [inspectingId, setInspectingId] = useState<string | null>(null);
 
   const nodesRef = useRef(nodes);
@@ -171,8 +170,7 @@ export function WorkflowCanvas({
         kind: "tool",
         label: server.name,
         serverSlug: server.slug,
-        // Which tool is the user's next decision, not a guess to be made
-        // here. The inspector opens on the same click to ask for it.
+        // Chosen by the user in the inspector, which opens on this click.
         toolSlug: UNCONFIGURED_TOOL,
         inputs: {},
       },
@@ -188,19 +186,12 @@ export function WorkflowCanvas({
     setInspectingId(node.id);
   }
 
-  // Tool nodes and the trigger have something to inspect. Resolved from
-  // `nodes` each render so an id left behind by a deleted node simply closes
-  // the panel.
-  const inspecting =
-    nodes.find((node) => node.id === inspectingId && node.data.kind === "tool") ??
-    null;
-  const inspectingTrigger = nodes.some(
-    (node) => node.id === inspectingId && node.data.kind === "trigger",
-  );
-
-  const inspectingServer = inspecting
-    ? connections.find((server) => server.slug === inspecting.data.serverSlug)
-    : undefined;
+  // Looked up each render, so deleting the node closes its panel.
+  const inspecting = nodes.find((node) => node.id === inspectingId);
+  const inspectingServerName =
+    connections.find((server) => server.slug === inspecting?.data.serverSlug)?.name ??
+    inspecting?.data.serverSlug ??
+    "Connection";
 
   return (
     <div className="relative h-full w-full">
@@ -213,8 +204,7 @@ export function WorkflowCanvas({
         onConnect={onConnect}
         onNodeClick={(_event, node) => {
           setMenu(null);
-          // Clicking a node that cannot be configured closes the panel rather
-          // than leaving it showing the previous selection.
+          // A node with nothing to configure closes the panel.
           setInspectingId(
             node.data.kind === "tool" || node.data.kind === "trigger" ? node.id : null,
           );
@@ -282,20 +272,23 @@ export function WorkflowCanvas({
         </div>
       ) : null}
 
-      {inspecting ? (
+      {inspecting?.data.kind === "tool" ? (
         <NodeInspector
+          key={inspecting.id}
           node={inspecting}
-          serverName={
-            inspectingServer?.name ?? inspecting.data.serverSlug ?? "Connection"
-          }
+          serverName={inspectingServerName}
           onChange={patchNode}
           onClose={() => setInspectingId(null)}
         />
       ) : null}
 
-      {inspectingTrigger && renderTriggerInspector
-        ? renderTriggerInspector(() => setInspectingId(null))
-        : null}
+      {inspecting?.data.kind === "trigger" && schedule ? (
+        <ScheduleInspector
+          schedule={schedule}
+          onSave={onSaveSchedule}
+          onClose={() => setInspectingId(null)}
+        />
+      ) : null}
     </div>
   );
 }

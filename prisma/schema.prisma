@@ -275,12 +275,8 @@ model Workflow {
   /// the bug entirely, which is why it survives testing.
   timezone String?
 
-  /// The instant a ONCE workflow fires, in UTC. Null for every other trigger.
-  ///
-  /// Kept apart from `nextRunAt`, which the worker clears after the run: this
-  /// is what the user picked, so the studio can still show "ran at 14:00"
-  /// afterwards and re-enabling can tell them the time has passed. `timezone`
-  /// is stored alongside only to render it back in the zone it was chosen in.
+  /// When a ONCE workflow fires, in UTC; null for other triggers. Unlike
+  /// `nextRunAt` it is kept after the run, so the studio can still show it.
   runAt DateTime?
 
   /// When this workflow is next due, in UTC. Derived from `cron` + `timezone`
@@ -335,14 +331,12 @@ model WorkflowRun {
   workflowId String
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  /// QUEUED rows are the queue: the Go worker (worker/) claims them with
-  /// FOR UPDATE SKIP LOCKED, moves them to RUNNING and executes them. The app
-  /// only ever inserts QUEUED.
+  /// QUEUED rows are the queue: the worker (worker/) claims them with
+  /// FOR UPDATE SKIP LOCKED. The app only ever inserts QUEUED.
   status  RunStatus       @default(QUEUED)
   trigger WorkflowTrigger
 
-  /// Run without calling any tool or model; each step records what it would
-  /// have sent.
+  /// Calls no tool or model; each step records what it would have sent.
   dryRun Boolean @default(false)
 
   /// The graph exactly as it was when this run started.
@@ -358,8 +352,7 @@ model WorkflowRun {
   /// Failure summary for the run as a whole. Per-step detail lives on
   /// WorkflowStepRun.error.
   error      String?
-  /// Output of the last step that produced one, which is what a run
-  /// "returns". Written by the worker when the run finishes.
+  /// Output of the last step that produced one; written by the worker.
   output     Json?
 
   stepRuns WorkflowStepRun[]

@@ -18,13 +18,9 @@ var (
 	comparison   = regexp.MustCompile(`(?i)^(.*?)\s*(==|!=|>=|<=|>|<|\bcontains\b|\bstarts with\b|\bends with\b)\s*(.*)$`)
 )
 
-// EvaluateCondition decides which way a branch goes.
-//
-// Deliberately not an expression evaluator: conditions come out of a language
-// model and are stored in a JSON blob, so executing them as code would make
-// every saved workflow a script. The grammar is small on purpose, and anything
-// outside it fails loudly rather than defaulting to false — a branch that
-// silently always takes one side is worse than one that stops.
+// EvaluateCondition decides which way a branch goes. Conditions come from a
+// model, so they are matched against a small fixed grammar instead of being
+// executed, and anything outside it is an error rather than a silent false.
 func EvaluateCondition(condition string, scope Scope) (bool, error) {
 	value, err := Resolve(condition, scope)
 	if err != nil {
@@ -67,8 +63,8 @@ func EvaluateCondition(condition string, scope Scope) (bool, error) {
 		return strings.HasSuffix(left, right), nil
 	}
 
-	a, okA := jsNumber(left)
-	b, okB := jsNumber(right)
+	a, okA := toNumber(left)
+	b, okB := toNumber(right)
 	if !okA || !okB {
 		return false, &ConditionError{msg: fmt.Sprintf(
 			"Branch condition %q compares values that are not numbers.", condition,

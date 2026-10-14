@@ -3,12 +3,8 @@ import type { RunStatus, WorkflowTrigger } from "@/generated/prisma/enums";
 
 /**
  * The app's side of running a workflow: queue it, then wait for the Go worker
- * (worker/) to finish it.
- *
- * Nothing here executes a step. The worker claims QUEUED rows, runs them and
- * writes the outcome back to WorkflowRun and WorkflowStepRun; this module
- * only reads that back into the shape the studio renders. Scheduled runs never
- * pass through here at all — the worker enqueues those itself.
+ * (worker/) to finish it. Nothing here executes a step, and scheduled runs
+ * never pass through here; the worker queues those itself.
  */
 
 export type RunOptions = {
@@ -30,10 +26,8 @@ export type RunSummary = {
   status: "SUCCEEDED" | "FAILED";
   error: string | null;
   /**
-   * What the run produced, which for most workflows is the whole point of
-   * having run it. Previewed rather than returned whole: a Gmail fetch is
-   * megabytes, and the full value is on WorkflowRun.output for anyone who
-   * needs it.
+   * A preview of what the run produced; a Gmail fetch can be megabytes. The
+   * full value is on WorkflowRun.output.
    */
   output: string | null;
   steps: {
@@ -54,16 +48,12 @@ export type RunOutcome =
 /** Enough to read a summary in the UI, small enough not to ship a mailbox. */
 const PREVIEW_LIMIT = 4000;
 
-/**
- * How long a request waits for the worker, kept under a typical serverless
- * limit. A run that outlasts it keeps going and shows up in run history.
- */
+/** How long a request waits for the worker; under a typical serverless limit. */
 const WAIT_MS = 240_000;
 
 /**
- * A run nobody has claimed after this long means no worker is running —
- * almost always `npm run worker` not started in development. Said quickly
- * rather than after the full wait.
+ * Still unclaimed after this means no worker is running (usually `npm run
+ * worker` not started), so say so without waiting the full time.
  */
 const UNCLAIMED_MS = 15_000;
 

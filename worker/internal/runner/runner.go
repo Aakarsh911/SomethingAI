@@ -1,14 +1,9 @@
-// Package runner connects the pure engine to the real world and keeps it fed.
-//
-// Three loops share one process:
+// Package runner connects the engine to the database, Composio and OpenAI,
+// and runs three loops:
 //
 //   - schedule: turns due workflows into QUEUED runs.
-//   - claim:    moves QUEUED runs to RUNNING and executes each in its own
-//     goroutine, up to Concurrency at once.
+//   - claim:    executes QUEUED runs, up to Concurrency at once.
 //   - reap:     fails runs whose worker died mid-run.
-//
-// Everything that differs between a real run and a rehearsal lives in the
-// Env built here, so the engine never learns what a dry run is.
 package runner
 
 import (
@@ -34,8 +29,7 @@ type Config struct {
 	ReapInterval     time.Duration
 	// StepTimeout caps a single tool or model call.
 	StepTimeout time.Duration
-	// RunTimeout caps a whole run. A run older than this plus ReapGrace is
-	// presumed dead.
+	// RunTimeout caps a whole run; one older than this plus ReapGrace is dead.
 	RunTimeout time.Duration
 	ReapGrace  time.Duration
 }
@@ -64,10 +58,9 @@ func New(cfg Config, st *store.Store, cc *composio.Client, lc *llm.Client, log *
 	}
 }
 
-// Run blocks until ctx is cancelled, then stops claiming new work and waits
-// for in-flight runs to finish. In-flight runs are not cancelled with ctx:
-// each already has its own RunTimeout, and cutting one off mid-step is how an
-// email gets sent without the run log knowing.
+// Run blocks until ctx is cancelled, then stops claiming and waits for
+// in-flight runs. Those are not cancelled: cutting one off mid-step could
+// send an email the run log never records.
 func (r *Runner) Run(ctx context.Context) {
 	r.reap(ctx)
 
@@ -99,16 +92,14 @@ func (r *Runner) every(ctx context.Context, interval time.Duration, fn func(cont
 func (r *Runner) schedule(ctx context.Context) {
 	now := time.Now()
 	n, err := r.store.EnqueueDue(ctx, now, 100, func(w store.DueWorkflow) *time.Time {
-		// A workflow that is no longer on a schedule keeps no slot, so it is
-		// not picked up again. That includes ONCE: its one slot is this one.
+		// No next slot unless on a recurring schedule; a ONCE run is its only slot.
 		if w.Trigger != "SCHEDULE" || w.Cron == nil || w.Timezone == nil {
 			return nil
 		}
 		next, err := schedule.Next(*w.Cron, *w.Timezone, now)
 		if err != nil {
-			// The app validated this on save, so reaching here means the two
-			// cron implementations disagree. Run this slot, park the rest
-			// rather than firing every tick, and make it loud.
+			// The app validated this on save, so the two cron libraries
+			// disagree. Run this slot, clear the rest, and log it.
 			r.log.Error("cannot compute next run; schedule cleared", "workflow", w.ID, "err", err)
 			return nil
 		}
@@ -189,14 +180,12 @@ func (r *Runner) reap(ctx context.Context) {
 	}
 }
 
-// execute runs one claimed run to completion. It deliberately does not take
-// the process context: see Run.
+// execute runs one claimed run. It does not take the process context; see Run.
 func (r *Runner) execute(run store.ClaimedRun) {
 	log := r.log.With("run", run.ID, "workflow", run.WorkflowID, "trigger", run.Trigger, "dryRun", run.DryRun)
 	started := time.Now()
 
-	// Writes after the run's deadline must still land, or the run stays
-	// RUNNING until the reaper finds it. Each gets its own short budget.
+	// Own short budget per write, so writes still land after the run's deadline.
 	persist := func(fn func(context.Context) error) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -213,8 +202,7 @@ func (r *Runner) execute(run store.ClaimedRun) {
 	}
 
 	defer func() {
-		// The engine is written not to panic, so reaching here is a bug. The
-		// run must not stay RUNNING because of it.
+		// A bug, but the run must not stay RUNNING because of it.
 		if p := recover(); p != nil {
 			log.Error("run panicked", "panic", p)
 			finish("FAILED", fmt.Sprintf("The worker hit an internal error: %v", p), nil)
@@ -266,11 +254,8 @@ func (r *Runner) execute(run store.ClaimedRun) {
 	finish(string(result.Status), result.Error, result.Output)
 }
 
-// liveEnv maps a graph's serverSlug onto the Composio account that backs it.
-//
-// Resolved once per run rather than per step: a ten-step Gmail workflow
-// should not make ten identical lookups, and a mid-run disconnect changing
-// behaviour between steps would be worse than failing consistently.
+// liveEnv calls real tools and models. Accounts are looked up once per run,
+// so a mid-run disconnect cannot change behaviour between steps.
 func (r *Runner) liveEnv(ctx context.Context, userID string) (engine.Env, error) {
 	accounts, err := r.store.ConnectedAccounts(ctx, userID)
 	if err != nil {
@@ -294,7 +279,7 @@ func (r *Runner) liveEnv(ctx context.Context, userID string) (engine.Env, error)
 		},
 		CallModel: func(ctx context.Context, call engine.ModelCall) (string, error) {
 			out, err := r.withStepTimeout(ctx, "the model step", func(ctx context.Context) (any, error) {
-				return r.llm.Transform(ctx, call.Instruction, call.Input)
+				return r.llm.Transform(ctx, call.Instruction, engine.Stringify(call.Input))
 			})
 			if err != nil {
 				return "", err
@@ -304,9 +289,8 @@ func (r *Runner) liveEnv(ctx context.Context, userID string) (engine.Env, error)
 	}, nil
 }
 
-// withStepTimeout gives one call StepTimeout and names it if it runs over.
-// A call cut short by the whole run expiring is left for the engine to
-// describe, since that is a different failure.
+// withStepTimeout gives one call StepTimeout and names it if it runs over. A
+// whole-run timeout is left for the engine to report.
 func (r *Runner) withStepTimeout(ctx context.Context, name string, fn func(context.Context) (any, error)) (any, error) {
 	stepCtx, cancel := context.WithTimeout(ctx, r.cfg.StepTimeout)
 	defer cancel()
@@ -318,11 +302,7 @@ func (r *Runner) withStepTimeout(ctx context.Context, name string, fn func(conte
 	return out, err
 }
 
-// dryRunEnv records what would have happened, calling nothing.
-//
-// Every workflow here sends real email the first time it succeeds, so there
-// has to be a way to prove the wiring — templates, ordering, branches —
-// without doing that.
+// dryRunEnv records what each step would have sent, calling nothing.
 func dryRunEnv() engine.Env {
 	return engine.Env{
 		CallTool: func(_ context.Context, call engine.ToolCall) (any, error) {

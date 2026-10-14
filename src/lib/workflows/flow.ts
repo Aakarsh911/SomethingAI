@@ -8,11 +8,8 @@ export type FlowNodeData = {
   serverSlug?: string;
   toolSlug?: string;
   /**
-   * The tool's argument template, edited by the inspector.
-   *
-   * Held on the flow node rather than read back off the saved graph so that
-   * an edit and a drag in the same debounce window do not overwrite each
-   * other: whichever change emits last would otherwise carry the stale copy.
+   * The tool's argument template. Held on the flow node, not read off the
+   * saved graph, so an edit and a drag in one save window keep each other.
    */
   inputs?: Record<string, unknown>;
   /**

@@ -4,19 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-// undefinedValue is what a template yields for a key that does not exist.
-//
-// It is kept distinct from nil (JSON null) because the two behave
-// differently downstream, exactly as undefined and null did in the
-// TypeScript engine this replaced: a tool argument that resolves to it is
-// dropped rather than sent as null, and a branch condition reads it as
-// "undefined" rather than "null".
+// undefinedValue is what a template yields for a missing key. Unlike nil
+// (JSON null), a tool argument resolving to it is dropped, and a condition
+// reads it as "undefined".
 type undefinedValue struct{}
 
 var undefined = undefinedValue{}
@@ -38,9 +33,8 @@ func templateErrorf(format string, args ...any) error {
 	return &TemplateError{msg: fmt.Sprintf(format, args...)}
 }
 
-// aliases normalises the spellings of {{previous.output}} the generator has
-// emitted over time. Workflows saved with the older ones are already in the
-// database, and normalising here is cheaper than a data migration.
+// aliases maps older spellings of {{previous.output}}, still present in saved
+// workflows, to the current one.
 var aliases = map[string]string{
 	"previous_step_output": "previous.output",
 	"previous_step.output": "previous.output",
@@ -67,8 +61,7 @@ func Resolve(value any, scope Scope) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			// JSON has no undefined; an array slot holding one serialises
-			// as null.
+			// JSON has no undefined; in an array it becomes null.
 			if resolved == undefined {
 				resolved = nil
 			}
@@ -95,8 +88,8 @@ func Resolve(value any, scope Scope) (any, error) {
 }
 
 func resolveString(value string, scope Scope) (any, error) {
-	// A string that is nothing but a placeholder yields the raw value, so an
-	// object or a number survives instead of becoming text.
+	// A lone placeholder yields the raw value, so objects and numbers keep
+	// their type.
 	if whole := wholePlaceholder.FindStringSubmatch(value); whole != nil {
 		return lookup(whole[1], scope)
 	}
@@ -115,7 +108,7 @@ func resolveString(value string, scope Scope) (any, error) {
 		if s, ok := resolved.(string); ok {
 			return s
 		}
-		return stringify(resolved)
+		return Stringify(resolved)
 	})
 	if firstErr != nil {
 		return nil, firstErr
@@ -172,8 +165,8 @@ func walk(value any, parts []string, rawPath string) (any, error) {
 		case nil, undefinedValue:
 			return nil, templateErrorf("\"{{%s}}\" reads past a missing value.", rawPath)
 		case []any:
-			index, ok := arrayIndex(part)
-			if !ok {
+			index, err := strconv.Atoi(part)
+			if err != nil {
 				return nil, templateErrorf("\"{{%s}}\" indexes an array with \"%s\".", rawPath, part)
 			}
 			if index < 0 || index >= len(c) {
@@ -195,19 +188,9 @@ func walk(value any, parts []string, rawPath string) (any, error) {
 	return cursor, nil
 }
 
-func arrayIndex(part string) (int, bool) {
-	f, ok := jsNumber(part)
-	if !ok || math.IsInf(f, 0) || f != math.Trunc(f) {
-		return 0, false
-	}
-	if f < math.MinInt32 || f > math.MaxInt32 {
-		return -1, true
-	}
-	return int(f), true
-}
-
-// stringify renders a value spliced into the middle of a string.
-func stringify(value any) string {
+// Stringify renders a value for splicing into text: objects as indented JSON,
+// missing values as "".
+func Stringify(value any) string {
 	switch v := value.(type) {
 	case nil, undefinedValue:
 		return ""
@@ -218,9 +201,8 @@ func stringify(value any) string {
 	}
 }
 
-// jsString is String(value) in JavaScript, which is how a branch condition
-// and an llm instruction were coerced. Kept faithful so a saved condition
-// evaluates the same way it did before the engine moved.
+// jsString is JavaScript's String(value), which saved conditions and llm
+// instructions were written against.
 func jsString(value any) string {
 	switch v := value.(type) {
 	case nil:
@@ -243,43 +225,16 @@ func jsString(value any) string {
 	}
 }
 
+// scalarString renders strings, bools and numbers, a float64 without an
+// exponent.
 func scalarString(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case bool:
-		return strconv.FormatBool(v)
-	case json.Number:
-		return v.String()
-	case float64:
-		return formatNumber(v)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	default:
-		return fmt.Sprint(v)
-	}
-}
-
-func formatNumber(f float64) string {
-	switch {
-	case math.IsNaN(f):
-		return "NaN"
-	case math.IsInf(f, 1):
-		return "Infinity"
-	case math.IsInf(f, -1):
-		return "-Infinity"
-	case math.Abs(f) >= 1e21:
-		return strconv.FormatFloat(f, 'g', -1, 64)
-	default:
+	if f, ok := value.(float64); ok {
 		return strconv.FormatFloat(f, 'f', -1, 64)
 	}
+	return fmt.Sprint(value)
 }
 
-// marshalIndent is JSON.stringify(value, null, 2): two-space indent, and no
-// escaping of <, > and & — this text is read by people and models, not
-// embedded in HTML.
+// marshalIndent is JSON.stringify(value, null, 2), without HTML escaping.
 func marshalIndent(value any) string {
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
@@ -291,41 +246,12 @@ func marshalIndent(value any) string {
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 
-var jsDecimal = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`)
-
-// jsNumber is Number(text) in JavaScript, restricted to the forms a person
-// would actually type into a condition. Blank text is 0, as it is there.
-func jsNumber(text string) (float64, bool) {
+// toNumber reads a number for a comparison. Blank is 0, as in JavaScript.
+func toNumber(text string) (float64, bool) {
 	s := strings.TrimSpace(text)
 	if s == "" {
 		return 0, true
 	}
-	switch s {
-	case "Infinity", "+Infinity":
-		return math.Inf(1), true
-	case "-Infinity":
-		return math.Inf(-1), true
-	}
-	lower := strings.ToLower(s)
-	for prefix, base := range map[string]int{"0x": 16, "0o": 8, "0b": 2} {
-		if strings.HasPrefix(lower, prefix) {
-			n, err := strconv.ParseUint(s[2:], base, 64)
-			if err != nil {
-				return 0, false
-			}
-			return float64(n), true
-		}
-	}
-	if !jsDecimal.MatchString(s) {
-		return 0, false
-	}
 	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		// Out of range still parses to ±Inf in JavaScript.
-		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-			return f, true
-		}
-		return 0, false
-	}
-	return f, true
+	return f, err == nil
 }

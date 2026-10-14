@@ -9,11 +9,16 @@ import {
   type BuilderMessage,
 } from "@/lib/ai/generate-workflow";
 import { parseGraph, type WorkflowGraph } from "@/lib/workflows/graph";
-import { isValidTimezone, ScheduleError } from "@/lib/workflows/schedule";
+import {
+  isValidTimezone,
+  ScheduleError,
+  scheduleView,
+} from "@/lib/workflows/schedule";
 import {
   getWorkflow,
   listVersions,
   updateWorkflow,
+  versionView,
 } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
@@ -113,9 +118,8 @@ export async function POST(
     const latestInstruction =
       messages.find((message) => message.role === "user")?.content ??
       "Updated with AI";
-    // The model cannot write a one-time trigger, so a MANUAL answer for a
-    // ONCE workflow means "not asked to change the schedule". Writing it back
-    // would silently cancel a send the user set up in the studio.
+    // The model cannot write ONCE, so MANUAL here means "schedule unchanged";
+    // writing it back would cancel the user's one-off.
     const keepSchedule =
       workflow.trigger === "ONCE" && result.draft.trigger === "MANUAL";
     const updated = await updateWorkflow(user.id, workflow.id, {
@@ -142,21 +146,13 @@ export async function POST(
         name: updated.name,
         description: updated.description,
         trigger: updated.trigger,
-        isEnabled: updated.isEnabled,
         cron: updated.cron,
         timezone: updated.timezone,
-        runAt: updated.runAt?.toISOString() ?? null,
-        nextRunAt: updated.nextRunAt?.toISOString() ?? null,
-        lastRunAt: updated.lastRunAt?.toISOString() ?? null,
+        schedule: scheduleView(updated),
         graph: updated.graph,
         updatedAt: updated.updatedAt.toISOString(),
       },
-      versions: versions.map((version) => ({
-        id: version.id,
-        revision: version.revision,
-        note: version.note,
-        createdAt: version.createdAt.toISOString(),
-      })),
+      versions: versions.map(versionView),
       droppedArgs: result.draft.droppedArgs,
     });
   } catch (error) {

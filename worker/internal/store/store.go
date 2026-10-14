@@ -1,16 +1,11 @@
-// Package store is the worker's view of the tables Prisma owns.
+// Package store reads and writes the tables Prisma owns (only Prisma migrates
+// them). Inserted rows get gen_random_uuid() ids, since Prisma's cuid()
+// default is applied client-side. Every query:
 //
-// Prisma remains the only thing that migrates the schema; this package just
-// reads and writes rows. Two conventions run through every query:
-//
-//   - Statements run in exec mode (no named prepared statements) so the
-//     worker can sit behind a transaction-pooling PgBouncer, the same pooled
-//     DATABASE_URL the app uses. Parameters therefore arrive typed from Go,
-//     which is why enums, JSON and timestamps are cast explicitly in SQL.
-//
-//   - Prisma's DateTime columns are TIMESTAMP(3) without a zone and hold UTC.
-//     Times are passed as UTC text and cast to timestamp, so the session's
-//     TimeZone setting can never shift them.
+//   - runs in exec mode, so the worker works behind a transaction-pooling
+//     PgBouncer; enums, JSON and timestamps are therefore cast in SQL.
+//   - passes times as UTC text cast to timestamp, matching Prisma's zone-less
+//     TIMESTAMP(3) columns whatever the session TimeZone.
 package store
 
 import (
@@ -24,17 +19,14 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"somethingai/worker/internal/cuid"
 )
 
 type Store struct {
 	pool *pgxpool.Pool
 }
 
-// prismaOnlyParams are connection-string options Prisma understands and
-// Postgres does not. pgx forwards unknown options to the server as runtime
-// parameters, which makes it refuse the connection outright.
+// prismaOnlyParams are DATABASE_URL options that Postgres would reject if pgx
+// forwarded them.
 var prismaOnlyParams = []string{
 	"connection_limit", "pool_timeout", "pgbouncer", "statement_cache_size",
 	"socket_timeout", "sslaccept",
@@ -96,21 +88,10 @@ type DueWorkflow struct {
 }
 
 // EnqueueDue turns every due workflow into a QUEUED run and advances its
-// nextRunAt, in one transaction.
-//
-// FOR UPDATE SKIP LOCKED is what makes this safe to run from several workers
-// at once, or from one worker whose ticks overlap: a workflow row is claimed
-// by exactly one transaction, and the slot is advanced before the lock is
-// released, so no one else can see it as due again. nextOf is called under
-// the lock to compute the following slot; returning nil clears it.
-//
-// nextRunAt is advanced whether the run later passes or fails, because a
-// workflow that fails at 09:00 should next be considered at its next slot,
-// not retried on every tick for the rest of the day.
-//
-// A ONCE workflow is also switched off in the same statement. Clearing
-// nextRunAt alone would stop it firing again, but it would still read as
-// "on" in the studio with nothing left to do.
+// nextRunAt in one transaction. FOR UPDATE SKIP LOCKED gives each due row to
+// exactly one worker; nextOf computes the following slot (nil clears it). The
+// slot advances whether the run passes or fails, and a ONCE workflow is
+// switched off in the same update.
 func (s *Store) EnqueueDue(
 	ctx context.Context,
 	now time.Time,
@@ -165,8 +146,7 @@ func (s *Store) EnqueueDue(
 			return 0, err
 		}
 
-		// Recorded as ONCE or SCHEDULE, whichever fired it, so run history
-		// can tell a one-off send from a recurring one.
+		// ONCE or SCHEDULE, so run history can tell a one-off from a repeat.
 		runTrigger := "SCHEDULE"
 		if w.Trigger == "ONCE" {
 			runTrigger = "ONCE"
@@ -174,8 +154,8 @@ func (s *Store) EnqueueDue(
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO "WorkflowRun"
 				(id, "workflowId", status, trigger, "graphSnapshot", "graphVersion", "dryRun", "createdAt")
-			VALUES ($1, $2, 'QUEUED', $6::"WorkflowTrigger", $3::jsonb, $4, false, $5::timestamp)`,
-			cuid.New(), w.ID, w.Graph, w.Version, ts(now), runTrigger,
+			VALUES (gen_random_uuid()::text, $1, 'QUEUED', $2::"WorkflowTrigger", $3::jsonb, $4, false, $5::timestamp)`,
+			w.ID, runTrigger, w.Graph, w.Version, ts(now),
 		); err != nil {
 			return 0, err
 		}
@@ -198,9 +178,8 @@ type ClaimedRun struct {
 	DryRun        bool
 }
 
-// ClaimQueued moves up to limit QUEUED runs to RUNNING and returns them.
-// SKIP LOCKED again: two workers polling at the same moment get disjoint
-// sets, never the same run.
+// ClaimQueued moves up to limit QUEUED runs to RUNNING and returns them;
+// SKIP LOCKED keeps two workers from claiming the same run.
 func (s *Store) ClaimQueued(ctx context.Context, now time.Time, limit int) ([]ClaimedRun, error) {
 	rows, err := s.pool.Query(ctx, `
 		UPDATE "WorkflowRun" AS r
@@ -227,10 +206,8 @@ func (s *Store) ClaimQueued(ctx context.Context, now time.Time, limit int) ([]Cl
 	})
 }
 
-// FinishRun records a run's outcome.
-//
-// Guarded on RUNNING so a run the reaper has already given up on is not
-// resurrected by a worker that turns out to have been alive after all.
+// FinishRun records a run's outcome. Guarded on RUNNING so a run the reaper
+// already failed is not resurrected.
 func (s *Store) FinishRun(ctx context.Context, runID, status, message string, output any, at time.Time) error {
 	encoded, err := encodeJSON(output)
 	if err != nil {
@@ -245,12 +222,8 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, message string, ou
 	return err
 }
 
-// ReapStale fails runs that have been RUNNING since before cutoff.
-//
-// A run cannot legitimately outlive its deadline, so one that has is a run
-// whose worker died — a deploy, an OOM, a lost host. It is failed rather than
-// requeued: re-running from the top could send an email a second time, and
-// never double-sending matters more than finishing.
+// ReapStale fails runs RUNNING since before cutoff, whose worker must have
+// died. They are failed, not requeued, so no step is ever sent twice.
 func (s *Store) ReapStale(ctx context.Context, cutoff, now time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE "WorkflowRun"
@@ -279,9 +252,7 @@ type Step struct {
 	FinishedAt time.Time
 }
 
-// RecordStep appends one attempt at one node. Attempts are always 1 for now;
-// `@@unique([runId, nodeId, attempt])` turns a double-write into an error
-// rather than a silent duplicate.
+// RecordStep appends one attempt at one node (always attempt 1 for now).
 func (s *Store) RecordStep(ctx context.Context, step Step) error {
 	input, err := encodeJSON(step.Input)
 	if err != nil {
@@ -295,9 +266,9 @@ func (s *Store) RecordStep(ctx context.Context, step Step) error {
 		INSERT INTO "WorkflowStepRun"
 			(id, "runId", "nodeId", "serverSlug", "toolSlug", status, attempt,
 			 input, output, error, "startedAt", "finishedAt", "createdAt")
-		VALUES ($1, $2, $3, $4, $5, $6::"RunStatus", 1,
-			$7::jsonb, $8::jsonb, $9, $10::timestamp, $11::timestamp, $11::timestamp)`,
-		cuid.New(), step.RunID, step.NodeID, nullable(step.ServerSlug), nullable(step.ToolSlug), step.Status,
+		VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5::"RunStatus", 1,
+			$6::jsonb, $7::jsonb, $8, $9::timestamp, $10::timestamp, $10::timestamp)`,
+		step.RunID, step.NodeID, nullable(step.ServerSlug), nullable(step.ToolSlug), step.Status,
 		input, output, nullable(step.Error), ts(step.StartedAt), ts(step.FinishedAt),
 	)
 	return err
@@ -305,12 +276,11 @@ func (s *Store) RecordStep(ctx context.Context, step Step) error {
 
 /* ------------------------------------------------------------- connections */
 
-// ConnectedAccounts maps each MCP server slug the user has connected (and
-// that is still enabled) to its Composio connected account id. The id can be
-// empty for servers that need none.
+// ConnectedAccounts maps each enabled, connected server slug to its Composio
+// account id, which may be empty.
 func (s *Store) ConnectedAccounts(ctx context.Context, userID string) (map[string]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT s.slug, c."externalAccountId"
+		SELECT s.slug, COALESCE(c."externalAccountId", '')
 		FROM "UserMcpConnection" AS c
 		JOIN "McpServer" AS s ON s.id = c."serverId"
 		WHERE c."userId" = $1 AND c.status = 'CONNECTED' AND s."isEnabled" = true`,
@@ -323,16 +293,11 @@ func (s *Store) ConnectedAccounts(ctx context.Context, userID string) (map[strin
 
 	accounts := map[string]string{}
 	for rows.Next() {
-		var slug string
-		var account *string
+		var slug, account string
 		if err := rows.Scan(&slug, &account); err != nil {
 			return nil, err
 		}
-		if account != nil {
-			accounts[slug] = *account
-		} else {
-			accounts[slug] = ""
-		}
+		accounts[slug] = account
 	}
 	return accounts, rows.Err()
 }
@@ -355,9 +320,7 @@ func encodeJSON(value any) (*string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode JSON: %w", err)
 	}
-	// jsonb rejects the NUL character outright, and tool output scraped from
-	// the web occasionally contains one. Stripping it beats losing the whole
-	// step record.
+	// jsonb rejects NUL, which scraped tool output sometimes contains.
 	if bytes.Contains(encoded, []byte(`\u0000`)) {
 		encoded, err = json.Marshal(stripNUL(value))
 		if err != nil {

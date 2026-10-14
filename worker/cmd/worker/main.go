@@ -1,12 +1,6 @@
-// Command worker executes SomethingAI workflows.
-//
-// It is the only thing that runs workflows. The Next.js app enqueues runs by
-// inserting QUEUED rows into WorkflowRun; this process claims them, runs them
-// and records every step. It also owns the schedule: due workflows are turned
-// into runs here, so no cron endpoint is needed.
-//
-// Any number of copies can run against the same database. Claims use
-// FOR UPDATE SKIP LOCKED, so a run or a schedule slot is taken by exactly one.
+// Command worker runs SomethingAI workflows: it claims the QUEUED runs the app
+// inserts, executes them, records each step, and turns due schedules into
+// runs. Copies can run side by side; claims use FOR UPDATE SKIP LOCKED.
 package main
 
 import (
@@ -17,13 +11,12 @@ import (
 	"strconv"
 	"syscall"
 	"time"
-	// Schedules are evaluated in the user's IANA zone. Embedding the zone
-	// database means that works on a minimal image with no tzdata package,
-	// instead of failing every scheduled workflow at runtime.
+	// Embedded so IANA zones resolve on a minimal image with no tzdata.
 	_ "time/tzdata"
 
+	"github.com/joho/godotenv"
+
 	"somethingai/worker/internal/composio"
-	"somethingai/worker/internal/dotenv"
 	"somethingai/worker/internal/llm"
 	"somethingai/worker/internal/runner"
 	"somethingai/worker/internal/store"
@@ -32,12 +25,18 @@ import (
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	// Run from worker/ in development, the app's .env is one level up.
-	if path, err := dotenv.Load(".env", "../.env"); err != nil {
-		log.Error("load env file", "path", path, "err", err)
-		os.Exit(1)
-	} else if path != "" {
+	// Development only: load the app's .env (one level up from worker/).
+	// Variables already set in the environment win.
+	for _, path := range []string{".env", "../.env"} {
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		if err := godotenv.Load(path); err != nil {
+			log.Error("load env file", "path", path, "err", err)
+			os.Exit(1)
+		}
 		log.Info("loaded env file", "path", path)
+		break
 	}
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -60,8 +59,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Each run holds a connection only while writing, but the claim and
-	// schedule loops want one each on top of the runs.
+	// One connection per run, plus spares for the claim and schedule loops.
 	st, err := store.Open(ctx, databaseURL, int32(concurrency+4))
 	if err != nil {
 		log.Error("open database", "err", err)

@@ -7,12 +7,13 @@ import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { McpServerView } from "@/lib/mcp/servers";
 import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
-import {
-  ScheduleContext,
-  pickSchedule,
-  type WorkflowSchedule,
-} from "./schedule-context";
-import { ScheduleInspector, type SchedulePatch } from "./schedule-inspector";
+import type { RunSummary } from "@/lib/workflows/runtime";
+import type { WorkflowSchedule } from "@/lib/workflows/schedule";
+import type { WorkflowVersionView } from "@/lib/workflows/store";
+import { requestJson } from "./request-json";
+import { ScheduleContext } from "./schedule-context";
+import type { SchedulePatch } from "./schedule-inspector";
+import { primaryButtonClass, secondaryButtonClass } from "./styles";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -21,33 +22,19 @@ export type WorkflowListItem = {
   updatedAt: string;
 };
 
-export type WorkflowVersionItem = {
-  id: string;
-  revision: number;
-  note: string | null;
-  createdAt: string;
-};
-
 export type WorkflowDetail = WorkflowListItem & {
   description: string | null;
   graph: WorkflowGraph;
   schedule: WorkflowSchedule;
 };
 
-type RunSummary = {
-  runId: string;
-  status: "SUCCEEDED" | "FAILED";
-  error: string | null;
-  output: string | null;
-  dryRun?: boolean;
-  steps: {
-    nodeId: string;
-    status: string;
-    serverSlug: string | null;
-    toolSlug: string | null;
-    error: string | null;
-    output: string | null;
-  }[];
+/** A finished run, remembering whether it was a test so the banner can say so. */
+type RunResult = RunSummary & { dryRun: boolean };
+
+/** What saving or restoring the graph answers with. */
+type SavedGraph = {
+  workflow: { graph: WorkflowGraph };
+  versions: WorkflowVersionView[];
 };
 
 type ModificationQuestion = {
@@ -62,16 +49,10 @@ type ModificationMessage = {
   content: string;
 };
 
-const primaryButton =
-  "h-8 cursor-pointer rounded-full border border-transparent bg-black px-3 text-sm font-medium text-neutral-50 transition-all duration-200 hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
-
-const secondaryButton =
-  "h-8 cursor-pointer rounded-full border border-[#ebebeb] bg-transparent px-3 text-sm font-medium text-black transition-all duration-200 hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]";
-
 export function WorkflowStudio(props: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
-  versions: WorkflowVersionItem[];
+  versions: WorkflowVersionView[];
   connections: McpServerView[];
 }) {
   // Remount when the selected workflow changes so local graph state is
@@ -87,7 +68,7 @@ function StudioInner({
 }: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
-  versions: WorkflowVersionItem[];
+  versions: WorkflowVersionView[];
   connections: McpServerView[];
 }) {
   const router = useRouter();
@@ -114,13 +95,11 @@ function StudioInner({
     null,
   );
   const [running, setRunning] = useState<false | "dry" | "live">(false);
-  const [runResult, setRunResult] = useState<RunSummary | null>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
 
-  // Steps placed on the canvas but never given a tool. Surfaced here so the
-  // user finds out before starting a live run, rather than from a failed step
-  // partway through one that has already sent something.
+  // Tool steps with no tool chosen; live runs are blocked until there are none.
   const unconfigured = (graph?.nodes ?? [])
     .filter((node) => node.kind === "tool" && isUnconfiguredTool(node.toolSlug))
     .map((node) => node.label ?? node.id);
@@ -137,23 +116,18 @@ function StudioInner({
     if (!name) return;
 
     setError(null);
-    const response = await fetch("/api/workflows", {
+    const result = await requestJson<{ workflow: { id: string } }>("/api/workflows", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: { name },
+      fallback: "Could not create the workflow.",
     });
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { id: string };
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
-      setError(body?.error ?? "Could not create the workflow.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
     setNameDraft("");
-    router.push(`/workflows/${body.workflow.id}`);
+    router.push(`/workflows/${result.data.workflow.id}`);
     router.refresh();
   }
 
@@ -163,25 +137,19 @@ function StudioInner({
     if (serialized === lastSaved.current) return true;
 
     setSaveState("saving");
-    const response = await fetch(`/api/workflows/${selected.id}`, {
+    const result = await requestJson<SavedGraph>(`/api/workflows/${selected.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: next }),
+      body: { graph: next },
+      fallback: "Could not save the workflow.",
     });
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { graph: WorkflowGraph };
-      versions?: WorkflowVersionItem[];
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
+    if (!result.ok) {
       setSaveState("error");
-      setError(body?.error ?? "Could not save the workflow.");
+      setError(result.error);
       return false;
     }
 
-    lastSaved.current = stableStringify(body.workflow.graph);
-    if (body.versions) setLocalVersions(body.versions);
+    lastSaved.current = stableStringify(result.data.workflow.graph);
+    setLocalVersions(result.data.versions);
     setSaveState("saved");
     router.refresh();
     return true;
@@ -200,51 +168,33 @@ function StudioInner({
   async function saveSchedule(patch: SchedulePatch): Promise<string | null> {
     if (!selected) return "No workflow selected.";
 
-    try {
-      const response = await fetch(`/api/workflows/${selected.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        workflow?: WorkflowSchedule;
-        error?: string;
-      } | null;
+    const result = await requestJson<{ workflow: { schedule: WorkflowSchedule } }>(
+      `/api/workflows/${selected.id}`,
+      { method: "PATCH", body: patch, fallback: "Could not save the schedule." },
+    );
+    if (!result.ok) return result.error;
 
-      if (!response.ok || !body?.workflow) {
-        return body?.error ?? "Could not save the schedule.";
-      }
-
-      setSchedule(pickSchedule(body.workflow));
-      router.refresh();
-      return null;
-    } catch {
-      return "Could not reach the server.";
-    }
+    setSchedule(result.data.workflow.schedule);
+    router.refresh();
+    return null;
   }
 
   async function restore(revision: number) {
     if (!selected) return;
     setError(null);
-    const response = await fetch(
+    const result = await requestJson<SavedGraph>(
       `/api/workflows/${selected.id}/versions/${revision}/restore`,
-      { method: "POST" },
+      { method: "POST", fallback: "Could not restore that version." },
     );
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { graph: WorkflowGraph };
-      versions?: WorkflowVersionItem[];
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
-      setError(body?.error ?? "Could not restore that version.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
-    setGraph(body.workflow.graph);
+    setGraph(result.data.workflow.graph);
     setCanvasKey((value) => value + 1);
-    lastSaved.current = stableStringify(body.workflow.graph);
-    if (body.versions) setLocalVersions(body.versions);
+    lastSaved.current = stableStringify(result.data.workflow.graph);
+    setLocalVersions(result.data.versions);
     setSaveState("saved");
     router.refresh();
   }
@@ -279,66 +229,57 @@ function StudioInner({
     setModificationFeedback(null);
     setError(null);
 
-    try {
-      const response = await fetch(`/api/workflows/${selected.id}/modify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        workflow?: WorkflowSchedule & {
-          name: string;
-          graph: WorkflowGraph;
-        };
-        versions?: WorkflowVersionItem[];
-        questions?: ModificationQuestion[];
-        droppedArgs?: string[];
-        error?: string;
-      } | null;
+    // The endpoint answers with either clarifying questions or the new workflow.
+    const result = await requestJson<{
+      questions?: ModificationQuestion[];
+      workflow?: { name: string; graph: WorkflowGraph; schedule: WorkflowSchedule };
+      versions?: WorkflowVersionView[];
+      droppedArgs?: string[];
+    }>(`/api/workflows/${selected.id}/modify`, {
+      method: "POST",
+      body: { messages, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      fallback: "Could not change the workflow.",
+    });
+    setModifying(false);
 
-      if (response.ok && body?.questions?.length) {
-        const assistantMessage = body.questions
-          .map((question) => `- (${question.id}) ${question.question}`)
-          .join("\n");
-        setModificationMessages([
-          ...messages,
-          { role: "assistant", content: assistantMessage },
-        ]);
-        setModificationQuestions(body.questions);
-        return;
-      }
-
-      if (!response.ok || !body?.workflow) {
-        setError(body?.error ?? "Could not change the workflow.");
-        setModificationMessages(messages);
-        return;
-      }
-
-      setGraph(body.workflow.graph);
-      setCanvasKey((value) => value + 1);
-      setDisplayName(body.workflow.name);
-      // An edit like "run it every Monday instead" changes the schedule too.
-      setSchedule(pickSchedule(body.workflow));
-      lastSaved.current = stableStringify(body.workflow.graph);
-      if (body.versions) setLocalVersions(body.versions);
-      setModificationMessages([]);
-      setModificationQuestions([]);
-      setSaveState("saved");
-      setModificationFeedback(
-        body.droppedArgs?.length
-          ? `Workflow changed. Ignored unsupported arguments: ${body.droppedArgs.join(", ")}`
-          : "Workflow changed and saved as a new graph version.",
-      );
-      router.refresh();
-    } catch {
-      setError("Could not reach the server.");
+    // On failure the conversation so far is kept, so a retry still carries it.
+    if (!result.ok) {
+      setError(result.error);
       setModificationMessages(messages);
-    } finally {
-      setModifying(false);
+      return;
     }
+
+    const { questions, workflow, versions, droppedArgs = [] } = result.data;
+    if (questions?.length) {
+      const assistantMessage = questions
+        .map((question) => `- (${question.id}) ${question.question}`)
+        .join("\n");
+      setModificationMessages([...messages, { role: "assistant", content: assistantMessage }]);
+      setModificationQuestions(questions);
+      return;
+    }
+    if (!workflow) {
+      setError("Could not change the workflow.");
+      setModificationMessages(messages);
+      return;
+    }
+
+    setGraph(workflow.graph);
+    setCanvasKey((value) => value + 1);
+    setDisplayName(workflow.name);
+    // An edit like "run it every Monday instead" changes the schedule too.
+    setSchedule(workflow.schedule);
+    lastSaved.current = stableStringify(workflow.graph);
+    if (versions) setLocalVersions(versions);
+    setModificationMessages([]);
+    setModificationQuestions([]);
+    setSaveState("saved");
+    setModificationFeedback(
+      droppedArgs.length
+        ? `Workflow changed. Ignored unsupported arguments: ${droppedArgs.join(", ")}`
+        : "Workflow changed and saved as a new graph version.",
+    );
+    router.refresh();
   }
 
   /**
@@ -360,41 +301,39 @@ function StudioInner({
       saveTimer.current = null;
     }
 
-    try {
-      if (!(await persistGraph(graph))) return;
-
-      const response = await fetch(`/api/workflows/${selected.id}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun }),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        run?: RunSummary;
-        error?: string;
-      } | null;
-
-      if (!response.ok || !body?.run) {
-        setError(body?.error ?? "Could not run the workflow.");
-        return;
-      }
-      setRunResult({ ...body.run, dryRun });
-      router.refresh();
-    } catch {
-      setError("Could not reach the server.");
-    } finally {
+    if (!(await persistGraph(graph))) {
       setRunning(false);
+      return;
     }
+
+    // A run that outlasts the server's wait answers 202: a message, no `run`.
+    const result = await requestJson<{ run?: RunSummary; error?: string }>(
+      `/api/workflows/${selected.id}/run`,
+      { method: "POST", body: { dryRun }, fallback: "Could not run the workflow." },
+    );
+    setRunning(false);
+
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    if (!result.data.run) {
+      setError(result.data.error ?? "Could not run the workflow.");
+      return;
+    }
+    setRunResult({ ...result.data.run, dryRun });
+    router.refresh();
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return;
 
-    const response = await fetch(`/api/workflows/${pendingDelete.id}`, {
+    const result = await requestJson<{ ok: true }>(`/api/workflows/${pendingDelete.id}`, {
       method: "DELETE",
+      fallback: "Could not delete the workflow.",
     });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setError(body?.error ?? "Could not delete the workflow.");
+    if (!result.ok) {
+      setError(result.error);
       setPendingDelete(null);
       return;
     }
@@ -433,7 +372,7 @@ function StudioInner({
             placeholder="New workflow"
             aria-label="New workflow name"
           />
-          <button type="submit" className={primaryButton} disabled={!nameDraft.trim()}>
+          <button type="submit" className={primaryButtonClass} disabled={!nameDraft.trim()}>
             Add
           </button>
         </form>
@@ -461,7 +400,7 @@ function StudioInner({
                     </Link>
                     <button
                       type="button"
-                      className={`${secondaryButton} px-2`}
+                      className={`${secondaryButtonClass} px-2`}
                       onClick={() => setPendingDelete(workflow)}
                     >
                       Delete
@@ -501,7 +440,7 @@ function StudioInner({
                 ) : null}
                 <button
                   type="button"
-                  className={secondaryButton}
+                  className={secondaryButtonClass}
                   disabled={running !== false}
                   onClick={() => void runNow(true)}
                   title="Walk the workflow without calling any tool or sending anything"
@@ -510,10 +449,9 @@ function StudioInner({
                 </button>
                 <button
                   type="button"
-                  className={primaryButton}
-                  // A live run is blocked, but a test run is not: walking a
-                  // half-built workflow to see how far it gets is the point of
-                  // the dry run, and it calls nothing.
+                  className={primaryButtonClass}
+                  // Only live runs are blocked: a test run calls nothing, and
+                  // seeing how far a half-built workflow gets is its point.
                   disabled={running !== false || unconfigured.length > 0}
                   onClick={() => void runNow(false)}
                   title={
@@ -617,17 +555,8 @@ function StudioInner({
                     graph={graph}
                     connections={connections}
                     onChange={queueSave}
-                    renderTriggerInspector={
-                      schedule
-                        ? (onClose) => (
-                            <ScheduleInspector
-                              schedule={schedule}
-                              onSave={saveSchedule}
-                              onClose={onClose}
-                            />
-                          )
-                        : undefined
-                    }
+                    schedule={schedule}
+                    onSaveSchedule={saveSchedule}
                   />
                 </ScheduleContext.Provider>
               </ReactFlowProvider>
@@ -683,7 +612,7 @@ function StudioInner({
                 />
                 <button
                   type="submit"
-                  className={primaryButton}
+                  className={primaryButtonClass}
                   disabled={modifying || !modification.trim()}
                 >
                   {modifying ? "Changing…" : "Change"}
@@ -721,12 +650,12 @@ function StudioInner({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                className={secondaryButton}
+                className={secondaryButtonClass}
                 onClick={() => setPendingDelete(null)}
               >
                 Cancel
               </button>
-              <button type="button" className={primaryButton} onClick={() => void confirmDelete()}>
+              <button type="button" className={primaryButtonClass} onClick={() => void confirmDelete()}>
                 Delete
               </button>
             </div>

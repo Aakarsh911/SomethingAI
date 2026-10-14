@@ -1,9 +1,6 @@
-// Package composio executes tools against a user's Composio connected
-// account over Composio's REST API.
-//
-// There is no Go SDK. The request mirrors what @composio/core sends from
-// executeComposioTool with dangerouslySkipVersionCheck: nothing in this app
-// pins toolkit versions yet, so every call asks for "latest".
+// Package composio executes tools against a user's Composio connected account
+// over the REST API (there is no Go SDK). Every call asks for the "latest"
+// toolkit version, since nothing in the app pins one yet.
 package composio
 
 import (
@@ -44,11 +41,8 @@ type ExecuteRequest struct {
 	ConnectedAccountID string
 }
 
-// Execute runs one tool and returns its `data`.
-//
-// Composio reports tool-level failures in a 200 body rather than as an HTTP
-// error, so `successful` is checked explicitly — otherwise a failed call
-// would be recorded as a successful step.
+// Execute runs one tool and returns its `data`. Composio reports tool
+// failures in a 200 body, so `successful` is checked explicitly.
 func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (any, error) {
 	if c.apiKey == "" {
 		return nil, errors.New("COMPOSIO_API_KEY is not set, so tools cannot run.")
@@ -113,11 +107,8 @@ func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (any, error) {
 	return result.Data, nil
 }
 
-// extractError digs the provider's explanation out of an error body.
-//
-// Taken from the innermost object that has a message: the outer layers
-// repeat Composio's generic wording, the inner one is the provider speaking.
-// A suggested_fix is appended when it says something the message does not.
+// extractError returns the innermost message in an error body (the provider's,
+// not Composio's generic wrapper), plus suggested_fix when it adds anything.
 func extractError(raw []byte) string {
 	var body any
 	if json.Unmarshal(raw, &body) != nil {

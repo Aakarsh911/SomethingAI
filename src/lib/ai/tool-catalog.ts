@@ -11,13 +11,7 @@ import { prisma } from "@/lib/db";
  * cheaper than detecting that after the fact.
  */
 
-/**
- * One argument of a tool, as described by the tool's own input schema.
- *
- * Richer than a bare name because the canvas renders a form from this: a
- * checkbox for a boolean and a dropdown for an enum are only possible if the
- * type and the allowed values survive the trip from Composio.
- */
+/** One tool argument, typed so the canvas can render the right field for it. */
 export type ToolParameter = {
   name: string;
   /** JSON Schema `type`, narrowed to what the form knows how to render. */
@@ -34,20 +28,10 @@ export type AvailableTool = {
   toolSlug: string;
   description: string;
   /**
-   * Accepted argument names, from the tool's own input schema.
-   *
-   * Carried through because slugs are not the only thing the model gets
-   * wrong: left to guess, it writes readable keys like "max results" where
-   * the tool wants "max_results", and the argument is silently discarded at
-   * call time. Knowing the real names lets the prompt state them and the
-   * validator reject anything else.
-   *
-   * Kept as a flat list of names alongside `schema` because the prompt and
-   * `reconcileToolInputs` only ever need the names, and both run on every
-   * generation.
+   * The tool's real arguments. The prompt and validator use the names (left
+   * to guess, the model writes "max results" for "max_results"); the canvas
+   * form uses the types.
    */
-  parameters: string[];
-  /** The same arguments with their types, for rendering an editor. */
   schema: ToolParameter[];
 };
 
@@ -90,12 +74,8 @@ const RENDERABLE_TYPES = new Set([
 ]);
 
 /**
- * Flattens a tool's JSON Schema into a flat argument list.
- *
- * Only the top level is read. Nested object properties are left as a single
- * `object` argument the user fills in as JSON, because generating a recursive
- * form for arbitrary tool schemas is a much larger job than the value it adds
- * for the handful of tools that need it.
+ * Flattens a tool's JSON Schema into an argument list. Only the top level is
+ * read; a nested object stays one `object` argument, edited as JSON.
  */
 function readSchema(input: ComposioTool["input_parameters"]): ToolParameter[] {
   const properties = input?.properties ?? {};
@@ -163,29 +143,18 @@ async function fetchToolkitTools(
   const body = (await response.json()) as { items?: ComposioTool[] };
   const tools: AvailableTool[] = (body.items ?? [])
     .filter((tool): tool is ComposioTool & { slug: string } => Boolean(tool.slug))
-    .map((tool) => {
-      const schema = readSchema(tool.input_parameters);
-      return {
-        serverSlug,
-        serverName,
-        toolSlug: tool.slug,
-        description: tool.description ?? tool.name ?? "",
-        parameters: schema.map((parameter) => parameter.name),
-        schema,
-      };
-    });
+    .map((tool) => ({
+      serverSlug,
+      serverName,
+      toolSlug: tool.slug,
+      description: tool.description ?? tool.name ?? "",
+      schema: readSchema(tool.input_parameters),
+    }));
 
   cache.set(toolkit, { at: Date.now(), tools });
   return tools;
 }
 
-/**
- * Tools from the servers this user has actually connected.
- *
- * Deliberately not the whole catalog: offering Gmail tools to someone who has
- * not connected Gmail produces a workflow that cannot run, and the failure
- * shows up at execution rather than at generation time.
- */
 /**
  * The connected accounts the builder can name in a question.
  *
@@ -211,6 +180,13 @@ export async function connectedAccountsForUser(userId: string) {
     }));
 }
 
+/**
+ * Tools from the servers this user has actually connected.
+ *
+ * Deliberately not the whole catalog: offering Gmail tools to someone who has
+ * not connected Gmail produces a workflow that cannot run, and the failure
+ * shows up at execution rather than at generation time.
+ */
 export async function availableToolsForUser(
   userId: string,
 ): Promise<AvailableTool[]> {
@@ -244,8 +220,8 @@ export function renderToolsForPrompt(tools: AvailableTool[]): string {
   return tools
     .map((tool) => {
       const args =
-        tool.parameters.length > 0
-          ? `\n    args: ${tool.parameters.join(", ")}`
+        tool.schema.length > 0
+          ? `\n    args: ${tool.schema.map((parameter) => parameter.name).join(", ")}`
           : "";
       return `- ${tool.toolSlug} (server: ${tool.serverSlug}) — ${tool.description.slice(0, 120)}${args}`;
     })
