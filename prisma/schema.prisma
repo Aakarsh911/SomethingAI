@@ -211,6 +211,8 @@ enum WorkflowTrigger {
   MANUAL
   SCHEDULE
   WEBHOOK
+  /// Fires once at `runAt`, then the worker switches the workflow off.
+  ONCE
 }
 
 enum RunStatus {
@@ -273,8 +275,12 @@ model Workflow {
   /// the bug entirely, which is why it survives testing.
   timezone String?
 
+  /// When a ONCE workflow fires, in UTC; null for other triggers. Unlike
+  /// `nextRunAt` it is kept after the run, so the studio can still show it.
+  runAt DateTime?
+
   /// When this workflow is next due, in UTC. Derived from `cron` + `timezone`
-  /// on save and recomputed after each run.
+  /// (or `runAt`) on save and recomputed after each run.
   ///
   /// This is what makes a scheduler affordable: the runner selects on an index
   /// rather than evaluating every cron expression on every tick.
@@ -325,8 +331,13 @@ model WorkflowRun {
   workflowId String
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
+  /// QUEUED rows are the queue: the worker (worker/) claims them with
+  /// FOR UPDATE SKIP LOCKED. The app only ever inserts QUEUED.
   status  RunStatus       @default(QUEUED)
   trigger WorkflowTrigger
+
+  /// Calls no tool or model; each step records what it would have sent.
+  dryRun Boolean @default(false)
 
   /// The graph exactly as it was when this run started.
   ///
@@ -341,6 +352,8 @@ model WorkflowRun {
   /// Failure summary for the run as a whole. Per-step detail lives on
   /// WorkflowStepRun.error.
   error      String?
+  /// Output of the last step that produced one; written by the worker.
+  output     Json?
 
   stepRuns WorkflowStepRun[]
 

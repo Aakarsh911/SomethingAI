@@ -23,8 +23,12 @@ import {
   newNodeId,
   type FlowEdge,
   type FlowNode,
+  type FlowNodeData,
 } from "@/lib/workflows/flow";
-import type { WorkflowGraph } from "@/lib/workflows/graph";
+import { UNCONFIGURED_TOOL, type WorkflowGraph } from "@/lib/workflows/graph";
+import type { WorkflowSchedule } from "@/lib/workflows/schedule";
+import { NodeInspector } from "./node-inspector";
+import { ScheduleInspector, type SchedulePatch } from "./schedule-inspector";
 import { BranchNode, LlmNode, ToolNode, TriggerNode } from "./workflow-nodes";
 
 const nodeTypes = {
@@ -65,10 +69,15 @@ export function WorkflowCanvas({
   graph,
   connections,
   onChange,
+  schedule,
+  onSaveSchedule,
 }: {
   graph: WorkflowGraph;
   connections: McpServerView[];
   onChange: (graph: WorkflowGraph) => void;
+  /** Lives on the workflow row rather than in the graph, so it is passed in. */
+  schedule: WorkflowSchedule | null;
+  onSaveSchedule: (patch: SchedulePatch) => Promise<string | null>;
 }) {
   const { screenToFlowPosition } = useReactFlow();
   const initial = graphToFlow(graph);
@@ -77,6 +86,8 @@ export function WorkflowCanvas({
   const [edges, setEdges] = useState<FlowEdge[]>(initial.edges);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [connectionSearch, setConnectionSearch] = useState("");
+  // By id, not value, so the panel always shows the current node.
+  const [inspectingId, setInspectingId] = useState<string | null>(null);
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
@@ -153,6 +164,21 @@ export function WorkflowCanvas({
     [emit],
   );
 
+  /** Applies an inspector edit to one node and saves. */
+  const patchNode = useCallback(
+    (nodeId: string, patch: Partial<FlowNodeData>) => {
+      setNodes((current) => {
+        const next = current.map((node) =>
+          node.id === nodeId ? { ...node, data: { ...node.data, ...patch } } : node,
+        );
+        nodesRef.current = next;
+        emit(next, edgesRef.current);
+        return next;
+      });
+    },
+    [emit],
+  );
+
   const deleteNode = useCallback(
     (nodeId: string) => {
       setNodes((current) => {
@@ -197,7 +223,9 @@ export function WorkflowCanvas({
         kind: "tool",
         label: server.name,
         serverSlug: server.slug,
-        toolSlug: "action",
+        // Chosen by the user in the inspector, which opens on this click.
+        toolSlug: UNCONFIGURED_TOOL,
+        inputs: {},
       },
     };
 
@@ -208,7 +236,15 @@ export function WorkflowCanvas({
       return next;
     });
     setMenu(null);
+    setInspectingId(node.id);
   }
+
+  // Looked up each render, so deleting the node closes its panel.
+  const inspecting = nodes.find((node) => node.id === inspectingId);
+  const inspectingServerName =
+    connections.find((server) => server.slug === inspecting?.data.serverSlug)?.name ??
+    inspecting?.data.serverSlug ??
+    "Connection";
 
   const filteredConnections = useMemo(() => {
     const query = connectionSearch.trim().toLowerCase();
@@ -257,6 +293,13 @@ export function WorkflowCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeClick={(_event, node) => {
+          setMenu(null);
+          // A node with nothing to configure closes the panel.
+          setInspectingId(
+            node.data.kind === "tool" || node.data.kind === "trigger" ? node.id : null,
+          );
+        }}
         onPaneClick={() => setMenu(null)}
         onPaneContextMenu={(event) => {
           event.preventDefault();
@@ -410,6 +453,24 @@ export function WorkflowCanvas({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {inspecting?.data.kind === "tool" ? (
+        <NodeInspector
+          key={inspecting.id}
+          node={inspecting}
+          serverName={inspectingServerName}
+          onChange={patchNode}
+          onClose={() => setInspectingId(null)}
+        />
+      ) : null}
+
+      {inspecting?.data.kind === "trigger" && schedule ? (
+        <ScheduleInspector
+          schedule={schedule}
+          onSave={onSaveSchedule}
+          onClose={() => setInspectingId(null)}
+        />
       ) : null}
     </div>
   );

@@ -9,11 +9,16 @@ import {
   type BuilderMessage,
 } from "@/lib/ai/generate-workflow";
 import { parseGraph, type WorkflowGraph } from "@/lib/workflows/graph";
-import { isValidTimezone, ScheduleError } from "@/lib/workflows/schedule";
+import {
+  isValidTimezone,
+  ScheduleError,
+  scheduleView,
+} from "@/lib/workflows/schedule";
 import {
   getWorkflow,
   listVersions,
   updateWorkflow,
+  versionView,
 } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +107,7 @@ export async function POST(
         trigger: workflow.trigger,
         cron: workflow.cron,
         timezone: workflow.timezone,
+        runAt: workflow.runAt?.toISOString() ?? null,
       },
     });
 
@@ -112,13 +118,21 @@ export async function POST(
     const latestInstruction =
       messages.find((message) => message.role === "user")?.content ??
       "Updated with AI";
+    // The model cannot write ONCE, so MANUAL here means "schedule unchanged";
+    // writing it back would cancel the user's one-off.
+    const keepSchedule =
+      workflow.trigger === "ONCE" && result.draft.trigger === "MANUAL";
     const updated = await updateWorkflow(user.id, workflow.id, {
       name: result.draft.name.slice(0, 120),
       description: result.draft.description.slice(0, 2000),
       graph: result.draft.graph,
-      trigger: result.draft.trigger,
-      cron: result.draft.cron,
-      timezone: result.draft.timezone,
+      ...(keepSchedule
+        ? {}
+        : {
+            trigger: result.draft.trigger,
+            cron: result.draft.cron,
+            timezone: result.draft.timezone,
+          }),
       versionNote: `AI edit: ${latestInstruction.slice(0, 100)}`,
     });
     if (!updated) {
@@ -134,15 +148,11 @@ export async function POST(
         trigger: updated.trigger,
         cron: updated.cron,
         timezone: updated.timezone,
+        schedule: scheduleView(updated),
         graph: updated.graph,
         updatedAt: updated.updatedAt.toISOString(),
       },
-      versions: versions.map((version) => ({
-        id: version.id,
-        revision: version.revision,
-        note: version.note,
-        createdAt: version.createdAt.toISOString(),
-      })),
+      versions: versions.map(versionView),
       droppedArgs: result.draft.droppedArgs,
     });
   } catch (error) {

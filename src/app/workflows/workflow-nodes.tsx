@@ -1,18 +1,34 @@
 "use client";
 
+import { useContext } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import type { FlowNode } from "@/lib/workflows/flow";
+import { isUnconfiguredTool } from "@/lib/workflows/graph";
+import { ScheduleContext, summarizeSchedule } from "./schedule-context";
 
 const shell =
   "min-w-[200px] rounded-xl border bg-white px-3.5 py-3 shadow-sm transition dark:bg-neutral-950";
 
 export function TriggerNode({ data }: NodeProps<FlowNode>) {
+  const schedule = useContext(ScheduleContext);
+  const summary = schedule ? summarizeSchedule(schedule) : null;
+
   return (
     <div className={`${shell} border-neutral-900 dark:border-[#ededed]`}>
       <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
         Trigger
       </p>
       <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+      {summary ? (
+        <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-[#666] dark:text-[#999]">
+          {summary.text}
+          {/* Called out because a saved-but-off schedule looks finished. */}
+          {summary.off ? (
+            <span className="text-amber-700 dark:text-amber-500"> · Off</span>
+          ) : null}
+        </p>
+      ) : null}
+      <p className="mt-1 text-[10px] text-[#999] dark:text-[#666]">Click to schedule</p>
       <Handle
         type="source"
         position={Position.Right}
@@ -23,20 +39,33 @@ export function TriggerNode({ data }: NodeProps<FlowNode>) {
 }
 
 export function ToolNode({ data }: NodeProps<FlowNode>) {
+  // Outlined because it otherwise looks finished and fails only at run time.
+  const unconfigured = isUnconfiguredTool(data.toolSlug);
+
   return (
-    <div className={`${shell} border-[#e5e5e5] dark:border-[#262626]`}>
+    <div
+      className={`${shell} ${
+        unconfigured
+          ? "border-dashed border-amber-400 dark:border-amber-600"
+          : "border-[#e5e5e5] dark:border-[#262626]"
+      }`}
+    >
       <Handle
         type="target"
         position={Position.Left}
         className="!h-3 !w-3 !border-2 !border-white !bg-neutral-900 dark:!border-neutral-950 dark:!bg-[#ededed]"
       />
       <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
-        Connection
+        {data.serverSlug ?? "Connection"}
       </p>
       <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
-      {data.serverSlug ? (
-        <p className="mt-1 font-mono text-[11px] text-[#999] dark:text-[#666]">{data.serverSlug}</p>
-      ) : null}
+      {unconfigured ? (
+        <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">Click to choose a tool</p>
+      ) : (
+        <p className="mt-1 max-w-[240px] truncate font-mono text-[11px] text-[#999] dark:text-[#666]">
+          {data.toolSlug}
+        </p>
+      )}
       <Handle
         type="source"
         position={Position.Right}

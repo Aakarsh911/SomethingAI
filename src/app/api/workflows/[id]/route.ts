@@ -1,13 +1,41 @@
+import { z } from "zod";
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import { parseGraph } from "@/lib/workflows/graph";
+import {
+  ScheduleError,
+  USER_TRIGGERS,
+  scheduleView,
+} from "@/lib/workflows/schedule";
 import {
   deleteWorkflow,
   getWorkflow,
   listVersions,
   updateWorkflow,
+  versionView,
 } from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
+
+/** Blank text means "clear it". */
+const optionalText = z
+  .string()
+  .trim()
+  .transform((value) => value || null)
+  .nullable()
+  .optional();
+
+/** Validity of the cron, zone and run time is checked by the store. */
+const schedulePatch = z.object({
+  trigger: z.enum(USER_TRIGGERS).optional(),
+  cron: optionalText,
+  timezone: optionalText,
+  runAt: z.iso
+    .datetime()
+    .transform((value) => new Date(value))
+    .nullable()
+    .optional(),
+  isEnabled: z.boolean().optional(),
+});
 
 function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>>) {
   return {
@@ -16,6 +44,7 @@ function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>
     description: workflow.description,
     trigger: workflow.trigger,
     isEnabled: workflow.isEnabled,
+    schedule: scheduleView(workflow),
     serverSlugs: workflow.serverSlugs,
     graphVersion: workflow.graphVersion,
     graph: workflow.graph,
@@ -40,12 +69,7 @@ export async function GET(
   const versions = await listVersions(user.id, id);
   return Response.json({
     workflow: serialize(workflow),
-    versions: versions.map((version) => ({
-      id: version.id,
-      revision: version.revision,
-      note: version.note,
-      createdAt: version.createdAt.toISOString(),
-    })),
+    versions: versions.map(versionView),
   });
 }
 
@@ -95,7 +119,24 @@ export async function PATCH(
     }
   }
 
-  const workflow = await updateWorkflow(user.id, id, input);
+  const schedule = schedulePatch.safeParse(body);
+  if (!schedule.success) {
+    return Response.json(
+      { error: "The schedule is invalid.", issues: schedule.error.issues },
+      { status: 400 },
+    );
+  }
+
+  let workflow;
+  try {
+    workflow = await updateWorkflow(user.id, id, { ...input, ...schedule.data });
+  } catch (error) {
+    // A bad cron, a past run time or an unknown zone is the caller's to fix.
+    if (error instanceof ScheduleError) {
+      return Response.json({ error: error.message }, { status: 422 });
+    }
+    throw error;
+  }
   if (!workflow) {
     return Response.json({ error: "Workflow not found." }, { status: 404 });
   }
@@ -103,12 +144,7 @@ export async function PATCH(
   const versions = await listVersions(user.id, id);
   return Response.json({
     workflow: serialize(workflow),
-    versions: versions.map((version) => ({
-      id: version.id,
-      revision: version.revision,
-      note: version.note,
-      createdAt: version.createdAt.toISOString(),
-    })),
+    versions: versions.map(versionView),
   });
 }
 

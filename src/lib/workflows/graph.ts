@@ -11,6 +11,17 @@ import { z } from "zod";
 /** Bumped when the blob's shape changes incompatibly. Stored per row. */
 export const CURRENT_GRAPH_VERSION = 1;
 
+/**
+ * The tool slug of a node placed but not configured yet. Unlike a plausible
+ * placeholder such as "action", it can be detected: the inspector asks for a
+ * tool, the studio blocks live runs, and the executor names the node.
+ */
+export const UNCONFIGURED_TOOL = "__unconfigured__";
+
+export function isUnconfiguredTool(toolSlug: string | undefined | null): boolean {
+  return !toolSlug || toolSlug === UNCONFIGURED_TOOL;
+}
+
 const nodeId = z
   .string()
   .min(1)
