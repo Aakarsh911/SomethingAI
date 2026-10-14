@@ -15,13 +15,13 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const primaryButton =
-  "h-9 cursor-pointer rounded-full border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 transition-all duration-200 hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
+  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
 
 const secondaryButton =
-  "h-9 cursor-pointer rounded-full border border-[#ebebeb] bg-transparent px-4 text-sm font-medium text-black transition-all duration-200 hover:bg-[#f2f2f2] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]";
+  "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
 
 const input =
-  "h-9 w-full rounded-lg border border-[#ebebeb] bg-transparent px-3 text-sm text-black outline-none focus:border-neutral-400 dark:border-[#1a1a1a] dark:text-[#ededed]";
+  "h-10 w-full rounded-xl border border-[#e5e5e5] bg-white px-3 text-sm text-black shadow-sm outline-none focus:border-neutral-400 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed]";
 
 export function IntegrationsList({
   connections,
@@ -72,18 +72,18 @@ export function IntegrationsList({
   const connected = connections.filter((server) => !server.isCustom);
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-12">
       {error ? (
         <p
           role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
         >
           {error}
         </p>
       ) : null}
 
       {connected.length > 0 ? (
-        <Section title="Connected">
+        <Section title="Connected" count={connected.length}>
           {connected.map((server) => (
             <ServerCard
               key={server.id}
@@ -104,24 +104,27 @@ export function IntegrationsList({
         </Section>
       ) : null}
 
-      <Section title="Available">
+      <Section title="Available" count={total}>
         <SearchBox initial={query} />
 
         {total === 0 ? (
           <EmptyNote>
             No MCP servers in the catalog yet. Run{" "}
-            <code>npm run db:sync-composio</code> to import them from Composio.
+            <code className="rounded bg-[#f0f0f0] px-1.5 py-0.5 font-mono text-xs dark:bg-[#1a1a1a]">
+              npm run db:sync-composio
+            </code>{" "}
+            to import them from Composio.
           </EmptyNote>
         ) : catalog.length === 0 ? (
           <EmptyNote>Nothing matches “{query}”.</EmptyNote>
         ) : (
           <>
-            <p className="text-sm text-[#999] dark:text-[#666]">
-              {query
-                ? `${total.toLocaleString()} match${total === 1 ? "" : "es"}`
-                : `${total.toLocaleString()} integrations`}
-              {shown < total ? `, showing ${shown}. Search to narrow.` : "."}
-            </p>
+            {shown < total ? (
+              <p className="text-xs text-[#999] dark:text-[#666]">
+                Showing {shown} of {total.toLocaleString()}. Search to narrow results.
+              </p>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
             {catalog.map((server) => (
               <ServerCard
                 key={server.id}
@@ -139,11 +142,12 @@ export function IntegrationsList({
                 }
               />
             ))}
+            </div>
           </>
         )}
       </Section>
 
-      <Section title="Your servers">
+      <Section title="Your servers" count={custom.length || undefined}>
         {custom.length === 0 ? (
           <EmptyNote>
             You have not added any servers of your own yet.
@@ -221,29 +225,52 @@ function SearchBox({ initial }: { initial: string }) {
   }, [value, initial, router, searchParams]);
 
   return (
-    <input
-      className={input}
-      type="search"
-      value={value}
-      onChange={(event) => setValue(event.target.value)}
-      placeholder="Search integrations — Slack, Jira, Stripe…"
-      aria-label="Search integrations"
-    />
+    <div className="relative">
+      <input
+        className={`${input} pl-9`}
+        type="search"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder="Search integrations — Slack, Jira, Stripe…"
+        aria-label="Search integrations"
+      />
+      <svg
+        className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#999] dark:text-[#666]"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+        aria-hidden
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"
+        />
+      </svg>
+    </div>
   );
 }
 
 function Section({
   title,
+  count,
   children,
 }: {
   title: string;
+  count?: number;
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
-        {title}
-      </h2>
+    <section className="flex flex-col gap-4">
+      <div className="flex items-baseline gap-2">
+        <h2 className="text-sm font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
+          {title}
+        </h2>
+        {count !== undefined ? (
+          <span className="text-xs text-[#999] dark:text-[#666]">{count}</span>
+        ) : null}
+      </div>
       {children}
     </section>
   );
@@ -251,7 +278,7 @@ function Section({
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-lg border border-dashed border-[#ebebeb] px-4 py-6 text-center text-sm text-[#666] dark:border-[#1a1a1a] dark:text-[#999]">
+    <p className="rounded-xl border border-dashed border-[#e5e5e5] bg-white px-4 py-8 text-center text-sm text-[#666] dark:border-[#262626] dark:bg-neutral-950 dark:text-[#999]">
       {children}
     </p>
   );
@@ -275,10 +302,10 @@ function ServerCard({
   const [showForm, setShowForm] = useState(false);
 
   return (
-    <article className="flex flex-col gap-3 rounded-xl border border-[#ebebeb] p-4 dark:border-[#1a1a1a]">
+    <article className="flex h-full flex-col gap-3 rounded-xl border border-[#e5e5e5] bg-white p-4 shadow-sm transition hover:border-[#d4d4d4] dark:border-[#262626] dark:bg-neutral-950 dark:hover:border-[#333]">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1">
-          <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-medium text-black dark:text-[#ededed]">
               {server.name}
             </h3>
@@ -293,13 +320,22 @@ function ServerCard({
             ) : null}
           </div>
           {server.description ? (
-            <p className="text-sm text-[#666] dark:text-[#999]">
+            <p className="line-clamp-2 text-sm leading-relaxed text-[#666] dark:text-[#999]">
               {server.description}
             </p>
           ) : null}
-          <p className="font-mono text-xs break-all text-[#999] dark:text-[#666]">
-            {server.url ?? `composio:${server.composioToolkit}`}
-          </p>
+          {server.categories && server.categories.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {server.categories.slice(0, 3).map((category) => (
+                <span
+                  key={category}
+                  className="rounded-md bg-[#f5f5f5] px-1.5 py-0.5 text-[10px] font-medium text-[#666] dark:bg-[#1a1a1a] dark:text-[#999]"
+                >
+                  {category}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {connection?.accountLabel ? (
             <p className="text-sm text-[#666] dark:text-[#999]">
               Connected as {connection.accountLabel}
