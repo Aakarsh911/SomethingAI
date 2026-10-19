@@ -19,7 +19,11 @@ export const metadata: Metadata = {
     "Describe an automation in plain English. SomethingAI compiles it into an editable MCP workflow graph.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <ClerkProvider>
       <html
