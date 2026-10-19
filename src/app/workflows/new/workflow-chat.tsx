@@ -146,6 +146,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     if (!trimmed || generating) return;
     setTraceRun((current) => current + 1);
     setShouldResetTranscript(true);
+    SpeechRecognition.stopListening();
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
@@ -204,6 +205,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         ref={threadRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
+<<<<<<< HEAD
         {empty ? (
           <div className="flex flex-col items-center text-center">
             <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
@@ -419,6 +421,7 @@ const Dictaphone = ({ promptInputRef, shouldReset }: { promptInputRef: React.Ref
       type="button"
       onClick={() => {
         SpeechRecognition.stopListening();
+        resetTranscript();
       }}
       className="flex size-8 items-center justify-center rounded-full text-red-500 dark:text-red-400 animate-pulse"
       aria-label="Stop voice input"
