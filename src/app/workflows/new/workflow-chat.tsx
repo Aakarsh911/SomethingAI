@@ -1,12 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
+import { FaMicrophone, FaStop } from "react-icons/fa";
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
+import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -73,6 +75,8 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [saving, setSaving] = useState(false);
   const [traceRun, setTraceRun] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
+  const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -141,6 +145,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     const trimmed = text.trim();
     if (!trimmed || generating) return;
     setTraceRun((current) => current + 1);
+    setShouldResetTranscript(true);
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
@@ -337,18 +342,89 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         </div>
       </div>
 
-      <AI_Prompt
-        className="mx-auto mb-4 w-full max-w-2xl shrink-0 py-2"
-        commands={[]}
-        defaultModel="SomethingAI"
-        disabled={!hasConnections}
-        headerText=""
-        models={[{ name: "SomethingAI" }]}
-        placeholder="Describe what you want to automate…"
-        showAttach={false}
-        onSubmit={(value, _model, options) => generate(value, options.signal)}
-      />
+      <div className="relative mx-auto mb-4 w-full max-w-2xl shrink-0">
+        <AI_Prompt
+          className="py-2"
+          commands={[]}
+          defaultModel="SomethingAI"
+          disabled={!hasConnections}
+          headerText=""
+          models={[{ name: "SomethingAI" }]}
+          placeholder="Describe what you want to automate…"
+          showAttach={false}
+          onSubmit={(value, _model, options) => {
+            setShouldResetTranscript(true);
+            return generate(value, options.signal);
+          }}
+        />
+        <div className="absolute right-16 bottom-[22px] z-10 pointer-events-auto">
+          <Dictaphone promptInputRef={promptInputRef} shouldReset={shouldResetTranscript} />
+        </div>
+      </div>
     </div>
+  );
+}
+
+const Dictaphone = ({ promptInputRef, shouldReset }: { promptInputRef: React.RefObject<HTMLTextAreaElement>; shouldReset?: boolean }) => {
+  const [isMounted, setIsMounted] = useState(false);
+  const {
+    transcript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition
+  } = useSpeechRecognition();
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (shouldReset) {
+      resetTranscript();
+    }
+  }, [shouldReset, resetTranscript]);
+
+  useEffect(() => {
+    if (transcript) {
+      // Find the textarea in the AI_Prompt component
+      const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
+      if (textarea) {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(textarea, transcript);
+          const event = new Event('input', { bubbles: true });
+          textarea.dispatchEvent(event);
+        }
+      }
+    }
+  }, [transcript]);
+
+  if (!isMounted || !browserSupportsSpeechRecognition) {
+    return null;
+  }
+
+  return !listening ? (
+    <button
+      type="button"
+      onClick={() => {
+        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
+      }}
+      className="flex size-8 items-center justify-center rounded-full text-black/60 hover:bg-black/5 hover:text-black dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white transition-[background-color,color] duration-150"
+      aria-label="Start voice input"
+    >
+      <FaMicrophone className="size-4" />
+    </button>
+  ) : (
+    <button
+      type="button"
+      onClick={() => {
+        SpeechRecognition.stopListening();
+      }}
+      className="flex size-8 items-center justify-center rounded-full text-red-500 dark:text-red-400 animate-pulse"
+      aria-label="Stop voice input"
+    >
+      <FaStop className="size-4" />
+    </button>
   );
 }
 
