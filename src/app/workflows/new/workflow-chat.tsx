@@ -77,6 +77,10 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     setShouldResetTranscript(false);
   }, []);
 
+  const handleClear = useCallback(() => {
+    setPrompt("");
+  }, []);
+
   /**
    * Sends the whole conversation, not just the latest turn.
    *
@@ -141,6 +145,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     if (!trimmed || generating) return;
     setPrompt("");
     setShouldResetTranscript(true);
+    SpeechRecognition.stopListening();
     void send([...messages, { role: "user", content: trimmed }], [
       { role: "user", text: trimmed },
     ]);
@@ -333,7 +338,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
             placeholder="Describe what you want to automate…"
             className="w-full rounded-xl border border-[#ebebeb] px-4 py-3 pr-12 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
           />
-          <Dictaphone onTranscriptChange={handleTranscriptChange} shouldReset={shouldResetTranscript} />
+          <Dictaphone onTranscriptChange={handleTranscriptChange} shouldReset={shouldResetTranscript} onClear={handleClear} />
         </div>
         <button
           type="submit"
@@ -347,7 +352,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   );
 }
 
-const Dictaphone = ({ onTranscriptChange, shouldReset }: { onTranscriptChange: (text: string) => void; shouldReset?: boolean }) => {
+const Dictaphone = ({ onTranscriptChange, shouldReset, onClear }: { onTranscriptChange: (text: string) => void; shouldReset?: boolean; onClear?: () => void }) => {
   const [isMounted, setIsMounted] = useState(false);
   const {
     transcript,
@@ -393,6 +398,10 @@ const Dictaphone = ({ onTranscriptChange, shouldReset }: { onTranscriptChange: (
       onClick={() => {
         console.log('Stopping speech recognition...');
         SpeechRecognition.stopListening();
+        resetTranscript();
+        if (onClear) {
+          onClear();
+        }
       }}
       className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500 dark:text-red-400 cursor-pointer animate-pulse"
     >
