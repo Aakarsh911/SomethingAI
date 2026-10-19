@@ -1,7 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { FaMicrophone, FaStop } from "react-icons/fa";
+
+import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -67,6 +70,12 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
+
+  const handleTranscriptChange = useCallback((text: string) => {
+    setPrompt(text);
+    setShouldResetTranscript(false);
+  }, []);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -131,6 +140,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     const trimmed = text.trim();
     if (!trimmed || generating) return;
     setPrompt("");
+    setShouldResetTranscript(true);
     void send([...messages, { role: "user", content: trimmed }], [
       { role: "user", text: trimmed },
     ]);
@@ -315,13 +325,16 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         }}
         className="flex items-center gap-3"
       >
-        <input
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          disabled={!hasConnections || generating}
-          placeholder="Describe what you want to automate…"
-          className="flex-1 rounded-xl border border-[#ebebeb] px-4 py-3 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
-        />
+        <div className="relative flex-1">
+          <input
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            disabled={!hasConnections || generating}
+            placeholder="Describe what you want to automate…"
+            className="w-full rounded-xl border border-[#ebebeb] px-4 py-3 pr-12 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
+          />
+          <Dictaphone onTranscriptChange={handleTranscriptChange} shouldReset={shouldResetTranscript} />
+        </div>
         <button
           type="submit"
           disabled={!hasConnections || generating || !prompt.trim()}
@@ -330,6 +343,60 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           Send
         </button>
       </form>
+    </div>
+  );
+}
+
+const Dictaphone = ({ onTranscriptChange, shouldReset }: { onTranscriptChange: (text: string) => void; shouldReset?: boolean }) => {
+  const [isMounted, setIsMounted] = useState(false);
+  const {
+    transcript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition
+  } = useSpeechRecognition();
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (shouldReset) {
+      resetTranscript();
+    }
+  }, [shouldReset, resetTranscript]);
+
+  useEffect(() => {
+    console.log('Listening:', listening, 'Transcript:', transcript);
+    if (transcript) {
+      onTranscriptChange(transcript);
+    }
+  }, [transcript, listening, onTranscriptChange]);
+
+  if (!isMounted || !browserSupportsSpeechRecognition) {
+    return null;
+  }
+
+  return !listening ? (
+    <div
+      onClick={() => {
+        console.log('Starting speech recognition...');
+        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
+      }}
+      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#999] dark:text-[#666] cursor-pointer hover:text-black dark:hover:text-white"
+    >
+      <FaMicrophone />
+    </div>
+  ) : (
+    <div
+      onClick={() => {
+        console.log('Stopping speech recognition...');
+        SpeechRecognition.stopListening();
+      }}
+      className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500 dark:text-red-400 cursor-pointer animate-pulse"
+    >
+      <FaStop />
     </div>
   );
 }
