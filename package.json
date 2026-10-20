@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently --names web,worker --prefix-colors blue,magenta \"npm:dev:web\" \"npm:worker\"",
+    "dev:web": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -14,6 +15,8 @@
     "db:sync-composio": "tsx prisma/sync-composio.ts",
     "db:studio": "prisma studio --port 5555",
     "typecheck": "tsc --noEmit",
+    "worker": "cd worker && go run ./cmd/worker",
+    "worker:test": "cd worker && go test ./...",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -35,6 +38,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.5",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "prisma": "^7.10.0",

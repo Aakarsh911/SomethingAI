@@ -11,21 +11,28 @@ import { prisma } from "@/lib/db";
  * cheaper than detecting that after the fact.
  */
 
+/** One tool argument, typed so the canvas can render the right field for it. */
+export type ToolParameter = {
+  name: string;
+  /** JSON Schema `type`, narrowed to what the form knows how to render. */
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object" | "unknown";
+  required: boolean;
+  description: string;
+  /** Present only for closed sets, which render as a dropdown. */
+  options?: string[];
+};
+
 export type AvailableTool = {
   serverSlug: string;
   serverName: string;
   toolSlug: string;
   description: string;
   /**
-   * Accepted argument names, from the tool's own input schema.
-   *
-   * Carried through because slugs are not the only thing the model gets
-   * wrong: left to guess, it writes readable keys like "max results" where
-   * the tool wants "max_results", and the argument is silently discarded at
-   * call time. Knowing the real names lets the prompt state them and the
-   * validator reject anything else.
+   * The tool's real arguments. The prompt and validator use the names (left
+   * to guess, the model writes "max results" for "max_results"); the canvas
+   * form uses the types.
    */
-  parameters: string[];
+  schema: ToolParameter[];
 };
 
 const COMPOSIO_API = "https://backend.composio.dev/api/v3";
@@ -43,8 +50,73 @@ type ComposioTool = {
   slug?: string;
   name?: string;
   description?: string;
-  input_parameters?: { properties?: Record<string, unknown> };
+  input_parameters?: {
+    properties?: Record<string, unknown>;
+    required?: unknown;
+  };
 };
+
+/** A single JSON Schema property, as far as the form cares about it. */
+type SchemaProperty = {
+  type?: unknown;
+  description?: unknown;
+  title?: unknown;
+  enum?: unknown;
+};
+
+const RENDERABLE_TYPES = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "array",
+  "object",
+]);
+
+/**
+ * Flattens a tool's JSON Schema into an argument list. Only the top level is
+ * read; a nested object stays one `object` argument, edited as JSON.
+ */
+function readSchema(input: ComposioTool["input_parameters"]): ToolParameter[] {
+  const properties = input?.properties ?? {};
+  const required = new Set(
+    Array.isArray(input?.required)
+      ? input.required.filter((name): name is string => typeof name === "string")
+      : [],
+  );
+
+  return Object.entries(properties).map(([name, raw]) => {
+    const property = (raw ?? {}) as SchemaProperty;
+
+    // A union like ["string", "null"] is normal in these schemas; the first
+    // non-null entry is what the user actually types.
+    const declared = Array.isArray(property.type)
+      ? property.type.find((entry) => entry !== "null")
+      : property.type;
+
+    const options = Array.isArray(property.enum)
+      ? property.enum.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : undefined;
+
+    return {
+      name,
+      type:
+        typeof declared === "string" && RENDERABLE_TYPES.has(declared)
+          ? (declared as ToolParameter["type"])
+          : "unknown",
+      required: required.has(name),
+      description:
+        typeof property.description === "string"
+          ? property.description
+          : typeof property.title === "string"
+            ? property.title
+            : "",
+      ...(options && options.length > 0 ? { options } : {}),
+    };
+  });
+}
 
 async function fetchToolkitTools(
   toolkit: string,
@@ -76,20 +148,13 @@ async function fetchToolkitTools(
       serverName,
       toolSlug: tool.slug,
       description: tool.description ?? tool.name ?? "",
-      parameters: Object.keys(tool.input_parameters?.properties ?? {}),
+      schema: readSchema(tool.input_parameters),
     }));
 
   cache.set(toolkit, { at: Date.now(), tools });
   return tools;
 }
 
-/**
- * Tools from the servers this user has actually connected.
- *
- * Deliberately not the whole catalog: offering Gmail tools to someone who has
- * not connected Gmail produces a workflow that cannot run, and the failure
- * shows up at execution rather than at generation time.
- */
 /**
  * The connected accounts the builder can name in a question.
  *
@@ -115,6 +180,13 @@ export async function connectedAccountsForUser(userId: string) {
     }));
 }
 
+/**
+ * Tools from the servers this user has actually connected.
+ *
+ * Deliberately not the whole catalog: offering Gmail tools to someone who has
+ * not connected Gmail produces a workflow that cannot run, and the failure
+ * shows up at execution rather than at generation time.
+ */
 export async function availableToolsForUser(
   userId: string,
 ): Promise<AvailableTool[]> {
@@ -148,8 +220,8 @@ export function renderToolsForPrompt(tools: AvailableTool[]): string {
   return tools
     .map((tool) => {
       const args =
-        tool.parameters.length > 0
-          ? `\n    args: ${tool.parameters.join(", ")}`
+        tool.schema.length > 0
+          ? `\n    args: ${tool.schema.map((parameter) => parameter.name).join(", ")}`
           : "";
       return `- ${tool.toolSlug} (server: ${tool.serverSlug}) — ${tool.description.slice(0, 120)}${args}`;
     })

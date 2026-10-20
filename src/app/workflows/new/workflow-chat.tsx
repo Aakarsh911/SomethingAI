@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import type { GeneratedTrigger } from "@/lib/workflows/schedule";
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -14,7 +15,7 @@ type Draft = {
   name: string;
   description: string;
   graph: unknown;
-  trigger: "MANUAL" | "SCHEDULE";
+  trigger: GeneratedTrigger;
   cron: string | null;
   timezone: string | null;
   scheduleLabel: string | null;

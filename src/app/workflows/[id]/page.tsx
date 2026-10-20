@@ -2,7 +2,13 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listServersForUser } from "@/lib/mcp/servers";
 import { parseGraph } from "@/lib/workflows/graph";
-import { getWorkflow, listVersions, listWorkflows } from "@/lib/workflows/store";
+import { scheduleView } from "@/lib/workflows/schedule";
+import {
+  getWorkflow,
+  listVersions,
+  listWorkflows,
+  versionView,
+} from "@/lib/workflows/store";
 import { WorkflowStudio } from "../studio";
 
 export const dynamic = "force-dynamic";
@@ -47,13 +53,9 @@ export default async function WorkflowPage({
         description: selected.description,
         updatedAt: selected.updatedAt.toISOString(),
         graph: parsed.data,
+        schedule: scheduleView(selected),
       }}
-      versions={versions.map((version) => ({
-        id: version.id,
-        revision: version.revision,
-        note: version.note,
-        createdAt: version.createdAt.toISOString(),
-      }))}
+      versions={versions.map(versionView)}
       connections={servers.filter(
         (server) => server.connection?.status === "CONNECTED",
       )}

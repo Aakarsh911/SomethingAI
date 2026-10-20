@@ -6,7 +6,14 @@ import { UserButton } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import type { McpServerView } from "@/lib/mcp/servers";
-import type { WorkflowGraph } from "@/lib/workflows/graph";
+import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
+import type { RunSummary } from "@/lib/workflows/runtime";
+import type { WorkflowSchedule } from "@/lib/workflows/schedule";
+import type { WorkflowVersionView } from "@/lib/workflows/store";
+import { requestJson } from "./request-json";
+import { ScheduleContext } from "./schedule-context";
+import type { SchedulePatch } from "./schedule-inspector";
+import { primaryButtonClass, secondaryButtonClass } from "./styles";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -15,32 +22,19 @@ export type WorkflowListItem = {
   updatedAt: string;
 };
 
-export type WorkflowVersionItem = {
-  id: string;
-  revision: number;
-  note: string | null;
-  createdAt: string;
-};
-
 export type WorkflowDetail = WorkflowListItem & {
   description: string | null;
   graph: WorkflowGraph;
+  schedule: WorkflowSchedule;
 };
 
-type RunSummary = {
-  runId: string;
-  status: "SUCCEEDED" | "FAILED";
-  error: string | null;
-  output: string | null;
-  dryRun?: boolean;
-  steps: {
-    nodeId: string;
-    status: string;
-    serverSlug: string | null;
-    toolSlug: string | null;
-    error: string | null;
-    output: string | null;
-  }[];
+/** A finished run, remembering whether it was a test so the banner can say so. */
+type RunResult = RunSummary & { dryRun: boolean };
+
+/** What saving or restoring the graph answers with. */
+type SavedGraph = {
+  workflow: { graph: WorkflowGraph };
+  versions: WorkflowVersionView[];
 };
 
 type ModificationQuestion = {
@@ -55,19 +49,13 @@ type ModificationMessage = {
   content: string;
 };
 
-const primaryButton =
-  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
-
-const secondaryButton =
-  "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
-
 const ghostLink =
   "rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#666] transition hover:bg-[#f5f5f5] hover:text-black dark:text-[#999] dark:hover:bg-[#1a1a1a] dark:hover:text-[#ededed]";
 
 export function WorkflowStudio(props: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
-  versions: WorkflowVersionItem[];
+  versions: WorkflowVersionView[];
   connections: McpServerView[];
 }) {
   // Remount when the selected workflow changes so local graph state is
@@ -83,13 +71,16 @@ function StudioInner({
 }: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
-  versions: WorkflowVersionItem[];
+  versions: WorkflowVersionView[];
   connections: McpServerView[];
 }) {
   const router = useRouter();
   const [nameDraft, setNameDraft] = useState("");
   const [displayName, setDisplayName] = useState(selected?.name ?? "");
   const [graph, setGraph] = useState<WorkflowGraph | null>(selected?.graph ?? null);
+  const [schedule, setSchedule] = useState<WorkflowSchedule | null>(
+    selected?.schedule ?? null,
+  );
   const [localVersions, setLocalVersions] = useState(versions);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState<string | null>(null);
@@ -107,9 +98,14 @@ function StudioInner({
     null,
   );
   const [running, setRunning] = useState<false | "dry" | "live">(false);
-  const [runResult, setRunResult] = useState<RunSummary | null>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
+
+  // Tool steps with no tool chosen; live runs are blocked until there are none.
+  const unconfigured = (graph?.nodes ?? [])
+    .filter((node) => node.kind === "tool" && isUnconfiguredTool(node.toolSlug))
+    .map((node) => node.label ?? node.id);
 
   useEffect(() => {
     return () => {
@@ -123,23 +119,18 @@ function StudioInner({
     if (!name) return;
 
     setError(null);
-    const response = await fetch("/api/workflows", {
+    const result = await requestJson<{ workflow: { id: string } }>("/api/workflows", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: { name },
+      fallback: "Could not create the workflow.",
     });
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { id: string };
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
-      setError(body?.error ?? "Could not create the workflow.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
     setNameDraft("");
-    router.push(`/workflows/${body.workflow.id}`);
+    router.push(`/workflows/${result.data.workflow.id}`);
     router.refresh();
   }
 
@@ -149,25 +140,19 @@ function StudioInner({
     if (serialized === lastSaved.current) return true;
 
     setSaveState("saving");
-    const response = await fetch(`/api/workflows/${selected.id}`, {
+    const result = await requestJson<SavedGraph>(`/api/workflows/${selected.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph: next }),
+      body: { graph: next },
+      fallback: "Could not save the workflow.",
     });
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { graph: WorkflowGraph };
-      versions?: WorkflowVersionItem[];
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
+    if (!result.ok) {
       setSaveState("error");
-      setError(body?.error ?? "Could not save the workflow.");
+      setError(result.error);
       return false;
     }
 
-    lastSaved.current = stableStringify(body.workflow.graph);
-    if (body.versions) setLocalVersions(body.versions);
+    lastSaved.current = stableStringify(result.data.workflow.graph);
+    setLocalVersions(result.data.versions);
     setSaveState("saved");
     router.refresh();
     return true;
@@ -182,28 +167,37 @@ function StudioInner({
     }, 800);
   }
 
+  /** Resolves to an error message for the panel, or null once saved. */
+  async function saveSchedule(patch: SchedulePatch): Promise<string | null> {
+    if (!selected) return "No workflow selected.";
+
+    const result = await requestJson<{ workflow: { schedule: WorkflowSchedule } }>(
+      `/api/workflows/${selected.id}`,
+      { method: "PATCH", body: patch, fallback: "Could not save the schedule." },
+    );
+    if (!result.ok) return result.error;
+
+    setSchedule(result.data.workflow.schedule);
+    router.refresh();
+    return null;
+  }
+
   async function restore(revision: number) {
     if (!selected) return;
     setError(null);
-    const response = await fetch(
+    const result = await requestJson<SavedGraph>(
       `/api/workflows/${selected.id}/versions/${revision}/restore`,
-      { method: "POST" },
+      { method: "POST", fallback: "Could not restore that version." },
     );
-    const body = (await response.json().catch(() => null)) as {
-      workflow?: { graph: WorkflowGraph };
-      versions?: WorkflowVersionItem[];
-      error?: string;
-    } | null;
-
-    if (!response.ok || !body?.workflow) {
-      setError(body?.error ?? "Could not restore that version.");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
 
-    setGraph(body.workflow.graph);
+    setGraph(result.data.workflow.graph);
     setCanvasKey((value) => value + 1);
-    lastSaved.current = stableStringify(body.workflow.graph);
-    if (body.versions) setLocalVersions(body.versions);
+    lastSaved.current = stableStringify(result.data.workflow.graph);
+    setLocalVersions(result.data.versions);
     setSaveState("saved");
     router.refresh();
   }
@@ -238,64 +232,57 @@ function StudioInner({
     setModificationFeedback(null);
     setError(null);
 
-    try {
-      const response = await fetch(`/api/workflows/${selected.id}/modify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages,
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        }),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        workflow?: {
-          name: string;
-          graph: WorkflowGraph;
-        };
-        versions?: WorkflowVersionItem[];
-        questions?: ModificationQuestion[];
-        droppedArgs?: string[];
-        error?: string;
-      } | null;
+    // The endpoint answers with either clarifying questions or the new workflow.
+    const result = await requestJson<{
+      questions?: ModificationQuestion[];
+      workflow?: { name: string; graph: WorkflowGraph; schedule: WorkflowSchedule };
+      versions?: WorkflowVersionView[];
+      droppedArgs?: string[];
+    }>(`/api/workflows/${selected.id}/modify`, {
+      method: "POST",
+      body: { messages, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+      fallback: "Could not change the workflow.",
+    });
+    setModifying(false);
 
-      if (response.ok && body?.questions?.length) {
-        const assistantMessage = body.questions
-          .map((question) => `- (${question.id}) ${question.question}`)
-          .join("\n");
-        setModificationMessages([
-          ...messages,
-          { role: "assistant", content: assistantMessage },
-        ]);
-        setModificationQuestions(body.questions);
-        return;
-      }
-
-      if (!response.ok || !body?.workflow) {
-        setError(body?.error ?? "Could not change the workflow.");
-        setModificationMessages(messages);
-        return;
-      }
-
-      setGraph(body.workflow.graph);
-      setCanvasKey((value) => value + 1);
-      setDisplayName(body.workflow.name);
-      lastSaved.current = stableStringify(body.workflow.graph);
-      if (body.versions) setLocalVersions(body.versions);
-      setModificationMessages([]);
-      setModificationQuestions([]);
-      setSaveState("saved");
-      setModificationFeedback(
-        body.droppedArgs?.length
-          ? `Workflow changed. Ignored unsupported arguments: ${body.droppedArgs.join(", ")}`
-          : "Workflow changed and saved as a new graph version.",
-      );
-      router.refresh();
-    } catch {
-      setError("Could not reach the server.");
+    // On failure the conversation so far is kept, so a retry still carries it.
+    if (!result.ok) {
+      setError(result.error);
       setModificationMessages(messages);
-    } finally {
-      setModifying(false);
+      return;
     }
+
+    const { questions, workflow, versions, droppedArgs = [] } = result.data;
+    if (questions?.length) {
+      const assistantMessage = questions
+        .map((question) => `- (${question.id}) ${question.question}`)
+        .join("\n");
+      setModificationMessages([...messages, { role: "assistant", content: assistantMessage }]);
+      setModificationQuestions(questions);
+      return;
+    }
+    if (!workflow) {
+      setError("Could not change the workflow.");
+      setModificationMessages(messages);
+      return;
+    }
+
+    setGraph(workflow.graph);
+    setCanvasKey((value) => value + 1);
+    setDisplayName(workflow.name);
+    // An edit like "run it every Monday instead" changes the schedule too.
+    setSchedule(workflow.schedule);
+    lastSaved.current = stableStringify(workflow.graph);
+    if (versions) setLocalVersions(versions);
+    setModificationMessages([]);
+    setModificationQuestions([]);
+    setSaveState("saved");
+    setModificationFeedback(
+      droppedArgs.length
+        ? `Workflow changed. Ignored unsupported arguments: ${droppedArgs.join(", ")}`
+        : "Workflow changed and saved as a new graph version.",
+    );
+    router.refresh();
   }
 
   /**
@@ -317,41 +304,39 @@ function StudioInner({
       saveTimer.current = null;
     }
 
-    try {
-      if (!(await persistGraph(graph))) return;
-
-      const response = await fetch(`/api/workflows/${selected.id}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun }),
-      });
-      const body = (await response.json().catch(() => null)) as {
-        run?: RunSummary;
-        error?: string;
-      } | null;
-
-      if (!response.ok || !body?.run) {
-        setError(body?.error ?? "Could not run the workflow.");
-        return;
-      }
-      setRunResult({ ...body.run, dryRun });
-      router.refresh();
-    } catch {
-      setError("Could not reach the server.");
-    } finally {
+    if (!(await persistGraph(graph))) {
       setRunning(false);
+      return;
     }
+
+    // A run that outlasts the server's wait answers 202: a message, no `run`.
+    const result = await requestJson<{ run?: RunSummary; error?: string }>(
+      `/api/workflows/${selected.id}/run`,
+      { method: "POST", body: { dryRun }, fallback: "Could not run the workflow." },
+    );
+    setRunning(false);
+
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    if (!result.data.run) {
+      setError(result.data.error ?? "Could not run the workflow.");
+      return;
+    }
+    setRunResult({ ...result.data.run, dryRun });
+    router.refresh();
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return;
 
-    const response = await fetch(`/api/workflows/${pendingDelete.id}`, {
+    const result = await requestJson<{ ok: true }>(`/api/workflows/${pendingDelete.id}`, {
       method: "DELETE",
+      fallback: "Could not delete the workflow.",
     });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setError(body?.error ?? "Could not delete the workflow.");
+    if (!result.ok) {
+      setError(result.error);
       setPendingDelete(null);
       return;
     }
@@ -404,7 +389,7 @@ function StudioInner({
               placeholder="Weekly report"
               aria-label="New workflow name"
             />
-            <button type="submit" className={primaryButton} disabled={!nameDraft.trim()}>
+            <button type="submit" className={primaryButtonClass} disabled={!nameDraft.trim()}>
               Add
             </button>
           </div>
@@ -491,9 +476,18 @@ function StudioInner({
                     </select>
                   </label>
                 ) : null}
+                {unconfigured.length > 0 ? (
+                  <span
+                    className="text-xs text-amber-700 dark:text-amber-500"
+                    title={unconfigured.join(", ")}
+                  >
+                    {unconfigured.length} step
+                    {unconfigured.length === 1 ? "" : "s"} need a tool
+                  </span>
+                ) : null}
                 <button
                   type="button"
-                  className={secondaryButton}
+                  className={secondaryButtonClass}
                   disabled={running !== false}
                   onClick={() => void runNow(true)}
                   title="Walk the workflow without calling any tool or sending anything"
@@ -502,9 +496,16 @@ function StudioInner({
                 </button>
                 <button
                   type="button"
-                  className={primaryButton}
-                  disabled={running !== false}
+                  className={primaryButtonClass}
+                  // Only live runs are blocked: a test run calls nothing, and
+                  // seeing how far a half-built workflow gets is its point.
+                  disabled={running !== false || unconfigured.length > 0}
                   onClick={() => void runNow(false)}
+                  title={
+                    unconfigured.length > 0
+                      ? "Every step needs a tool before this can run"
+                      : undefined
+                  }
                 >
                   {running === "live" ? "Running…" : "Run now"}
                 </button>
@@ -580,12 +581,16 @@ function StudioInner({
 
             <div className="relative min-h-0 flex-1">
               <ReactFlowProvider>
-                <WorkflowCanvas
-                  key={canvasKey}
-                  graph={graph}
-                  connections={connections}
-                  onChange={queueSave}
-                />
+                <ScheduleContext.Provider value={schedule}>
+                  <WorkflowCanvas
+                    key={canvasKey}
+                    graph={graph}
+                    connections={connections}
+                    onChange={queueSave}
+                    schedule={schedule}
+                    onSaveSchedule={saveSchedule}
+                  />
+                </ScheduleContext.Provider>
               </ReactFlowProvider>
               {modifying ? (
                 <div
@@ -639,7 +644,7 @@ function StudioInner({
                 />
                 <button
                   type="submit"
-                  className={primaryButton}
+                  className={primaryButtonClass}
                   disabled={modifying || !modification.trim()}
                 >
                   {modifying ? "Changing…" : "Change"}
@@ -657,7 +662,7 @@ function StudioInner({
                 Create one in the sidebar, then right-click the canvas to add a
                 connected tool. Drag between handles to wire steps together.
               </p>
-              <Link href="/workflows/new" className={`${primaryButton} mt-5 inline-flex`}>
+              <Link href="/workflows/new" className={`${primaryButtonClass} mt-5 inline-flex`}>
                 Build with AI
               </Link>
             </div>
@@ -684,12 +689,12 @@ function StudioInner({
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                className={secondaryButton}
+                className={secondaryButtonClass}
                 onClick={() => setPendingDelete(null)}
               >
                 Cancel
               </button>
-              <button type="button" className={primaryButton} onClick={() => void confirmDelete()}>
+              <button type="button" className={primaryButtonClass} onClick={() => void confirmDelete()}>
                 Delete
               </button>
             </div>

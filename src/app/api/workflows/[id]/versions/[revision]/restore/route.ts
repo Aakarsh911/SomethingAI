@@ -1,5 +1,9 @@
 import { getCurrentUser, unauthorized } from "@/lib/auth";
-import { listVersions, restoreWorkflowVersion } from "@/lib/workflows/store";
+import {
+  listVersions,
+  restoreWorkflowVersion,
+  versionView,
+} from "@/lib/workflows/store";
 
 export const dynamic = "force-dynamic";
 
@@ -35,11 +39,6 @@ export async function POST(
       createdAt: workflow.createdAt.toISOString(),
       updatedAt: workflow.updatedAt.toISOString(),
     },
-    versions: versions.map((version) => ({
-      id: version.id,
-      revision: version.revision,
-      note: version.note,
-      createdAt: version.createdAt.toISOString(),
-    })),
+    versions: versions.map(versionView),
   });
 }
