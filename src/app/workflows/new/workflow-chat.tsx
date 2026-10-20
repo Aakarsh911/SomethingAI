@@ -1,14 +1,18 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
-import { FaMicrophone, FaStop } from "react-icons/fa";
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
+import SpeechRecognition from "react-speech-recognition";
+
+const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
+  ssr: false
+});
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -364,70 +368,6 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         </div>
       </div>
     </div>
-  );
-}
-
-const Dictaphone = ({ promptInputRef, shouldReset }: { promptInputRef: React.RefObject<HTMLTextAreaElement>; shouldReset?: boolean }) => {
-  const [isMounted, setIsMounted] = useState(false);
-  const {
-    transcript,
-    listening,
-    resetTranscript,
-    browserSupportsSpeechRecognition
-  } = useSpeechRecognition();
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (shouldReset) {
-      resetTranscript();
-    }
-  }, [shouldReset, resetTranscript]);
-
-  useEffect(() => {
-    if (transcript) {
-      // Find the textarea in the AI_Prompt component
-      const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
-      if (textarea) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-        if (nativeInputValueSetter) {
-          nativeInputValueSetter.call(textarea, transcript);
-          const event = new Event('input', { bubbles: true });
-          textarea.dispatchEvent(event);
-        }
-      }
-    }
-  }, [transcript]);
-
-  if (!isMounted || !browserSupportsSpeechRecognition) {
-    return null;
-  }
-
-  return !listening ? (
-    <button
-      type="button"
-      onClick={() => {
-        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
-      }}
-      className="flex size-8 items-center justify-center rounded-full text-black/60 hover:bg-black/5 hover:text-black dark:text-white/60 dark:hover:bg-white/10 dark:hover:text-white transition-[background-color,color] duration-150"
-      aria-label="Start voice input"
-    >
-      <FaMicrophone className="size-4" />
-    </button>
-  ) : (
-    <button
-      type="button"
-      onClick={() => {
-        SpeechRecognition.stopListening();
-        resetTranscript();
-      }}
-      className="flex size-8 items-center justify-center rounded-full text-red-500 dark:text-red-400 animate-pulse"
-      aria-label="Stop voice input"
-    >
-      <FaStop className="size-4" />
-    </button>
   );
 }
 
