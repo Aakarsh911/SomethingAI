@@ -1,10 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { FaMicrophone, FaStop } from "react-icons/fa";
+import { useCallback, useState } from "react";
+import SpeechRecognition from "react-speech-recognition";
 
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
+const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
+  ssr: false
+});
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -348,64 +351,6 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           Send
         </button>
       </form>
-    </div>
-  );
-}
-
-const Dictaphone = ({ onTranscriptChange, shouldReset, onClear }: { onTranscriptChange: (text: string) => void; shouldReset?: boolean; onClear?: () => void }) => {
-  const [isMounted, setIsMounted] = useState(false);
-  const {
-    transcript,
-    listening,
-    resetTranscript,
-    browserSupportsSpeechRecognition
-  } = useSpeechRecognition();
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (shouldReset) {
-      resetTranscript();
-    }
-  }, [shouldReset, resetTranscript]);
-
-  useEffect(() => {
-    console.log('Listening:', listening, 'Transcript:', transcript);
-    if (transcript) {
-      onTranscriptChange(transcript);
-    }
-  }, [transcript, listening, onTranscriptChange]);
-
-  if (!isMounted || !browserSupportsSpeechRecognition) {
-    return null;
-  }
-
-  return !listening ? (
-    <div
-      onClick={() => {
-        console.log('Starting speech recognition...');
-        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
-      }}
-      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#999] dark:text-[#666] cursor-pointer hover:text-black dark:hover:text-white"
-    >
-      <FaMicrophone />
-    </div>
-  ) : (
-    <div
-      onClick={() => {
-        console.log('Stopping speech recognition...');
-        SpeechRecognition.stopListening();
-        resetTranscript();
-        if (onClear) {
-          onClear();
-        }
-      }}
-      className="absolute right-4 top-1/2 -translate-y-1/2 text-red-500 dark:text-red-400 cursor-pointer animate-pulse"
-    >
-      <FaStop />
     </div>
   );
 }
