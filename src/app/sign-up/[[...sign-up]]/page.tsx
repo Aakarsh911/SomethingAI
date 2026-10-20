@@ -1,9 +1,10 @@
 import { SignUp } from "@clerk/nextjs";
+import { AuthChrome } from "@/components/auth-chrome";
 
 export default function SignUpPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center">
+    <AuthChrome>
       <SignUp />
-    </div>
+    </AuthChrome>
   );
 }

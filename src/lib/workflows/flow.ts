@@ -46,6 +46,8 @@ export function graphToFlow(graph: WorkflowGraph): {
       id: edgeId(edge.from, edge.to, edge.when),
       source: edge.from,
       target: edge.to,
+      type: "workflow",
+      animated: true,
       data: { when: edge.when },
     })),
   };

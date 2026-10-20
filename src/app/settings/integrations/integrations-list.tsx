@@ -6,22 +6,20 @@ import type { ConnectField } from "@/lib/mcp/composio";
 import type { McpServerView } from "@/lib/mcp/servers";
 
 const STATUS_STYLES: Record<string, string> = {
-  CONNECTED:
-    "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300",
-  PENDING:
-    "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  ERROR: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
-  REVOKED: "bg-neutral-100 text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400",
+  CONNECTED: "bg-ok/12 text-ok",
+  PENDING: "bg-warn/15 text-[color:var(--warn)]",
+  ERROR: "bg-destructive/10 text-destructive",
+  REVOKED: "bg-muted text-muted-foreground",
 };
 
 const primaryButton =
-  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
+  "inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50";
 
 const secondaryButton =
-  "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
+  "inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 const input =
-  "h-10 w-full rounded-xl border border-[#e5e5e5] bg-white px-3 text-sm text-black shadow-sm outline-none focus:border-neutral-400 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed]";
+  "h-10 w-full rounded-xl border border-input bg-card px-3 text-sm text-foreground shadow-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export function IntegrationsList({
   connections,
@@ -71,46 +69,62 @@ export function IntegrationsList({
   const custom = connections.filter((server) => server.isCustom);
   const connected = connections.filter((server) => !server.isCustom);
 
+  function credentials(server: McpServerView) {
+    return (values: Record<string, string>) =>
+      mutate(server.id, () =>
+        fetch(`/api/mcp/connect/${server.id}/credentials`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ values }),
+        }),
+      );
+  }
+
   return (
-    <div className="flex flex-col gap-12">
+    <div className="flex flex-col gap-6">
       {error ? (
         <p
           role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+          className="rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive"
         >
           {error}
         </p>
       ) : null}
 
-      {connected.length > 0 ? (
-        <Section title="Connected" count={connected.length}>
-          {connected.map((server) => (
-            <ServerCard
-              key={server.id}
-              server={server}
-              busy={busyId === server.id || isPending}
-              onDisconnect={() => disconnect(server)}
-              onSubmitCredentials={(values) =>
-                mutate(server.id, () =>
-                  fetch(`/api/mcp/connect/${server.id}/credentials`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ values }),
-                  }),
-                )
-              }
-            />
-          ))}
-        </Section>
-      ) : null}
+      <section className="flex flex-col gap-4">
+        <SectionHead
+          title="Connected"
+          count={connected.length}
+          hint="Ready to use in a workflow"
+        />
+        {connected.length === 0 ? (
+          <EmptyNote>Nothing connected yet. Pick one from the catalog below.</EmptyNote>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {connected.map((server) => (
+              <ServerCard
+                key={server.id}
+                server={server}
+                busy={busyId === server.id || isPending}
+                onDisconnect={() => disconnect(server)}
+                onSubmitCredentials={credentials(server)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
-      <Section title="Available" count={total}>
+      <section className="flex flex-col gap-4">
+        <SectionHead
+          title="Catalog"
+          count={total}
+          hint="Search the full directory — this page only loads a slice"
+        />
         <SearchBox initial={query} />
-
         {total === 0 ? (
           <EmptyNote>
             No MCP servers in the catalog yet. Run{" "}
-            <code className="rounded bg-[#f0f0f0] px-1.5 py-0.5 font-mono text-xs dark:bg-[#1a1a1a]">
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
               npm run db:sync-composio
             </code>{" "}
             to import them from Composio.
@@ -120,61 +134,50 @@ export function IntegrationsList({
         ) : (
           <>
             {shown < total ? (
-              <p className="text-xs text-[#999] dark:text-[#666]">
+              <p className="text-xs text-subtle">
                 Showing {shown} of {total.toLocaleString()}. Search to narrow results.
               </p>
             ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
-            {catalog.map((server) => (
+              {catalog.map((server) => (
+                <ServerCard
+                  key={server.id}
+                  server={server}
+                  busy={busyId === server.id || isPending}
+                  onDisconnect={() => disconnect(server)}
+                  onSubmitCredentials={credentials(server)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <SectionHead
+          title="Your servers"
+          count={custom.length}
+          hint="Bring your own MCP endpoint"
+        />
+        {custom.length === 0 ? (
+          <EmptyNote>You have not added any servers of your own yet.</EmptyNote>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {custom.map((server) => (
               <ServerCard
                 key={server.id}
                 server={server}
                 busy={busyId === server.id || isPending}
                 onDisconnect={() => disconnect(server)}
-                onSubmitCredentials={(values) =>
+                onSubmitCredentials={credentials(server)}
+                onRemove={() =>
                   mutate(server.id, () =>
-                    fetch(`/api/mcp/connect/${server.id}/credentials`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ values }),
-                    }),
+                    fetch(`/api/mcp/servers/${server.id}`, { method: "DELETE" }),
                   )
                 }
               />
             ))}
-            </div>
-          </>
-        )}
-      </Section>
-
-      <Section title="Your servers" count={custom.length || undefined}>
-        {custom.length === 0 ? (
-          <EmptyNote>
-            You have not added any servers of your own yet.
-          </EmptyNote>
-        ) : (
-          custom.map((server) => (
-            <ServerCard
-              key={server.id}
-              server={server}
-              busy={busyId === server.id || isPending}
-              onDisconnect={() => disconnect(server)}
-              onSubmitCredentials={(values) =>
-                mutate(server.id, () =>
-                  fetch(`/api/mcp/connect/${server.id}/credentials`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ values }),
-                  }),
-                )
-              }
-              onRemove={() =>
-                mutate(server.id, () =>
-                  fetch(`/api/mcp/servers/${server.id}`, { method: "DELETE" }),
-                )
-              }
-            />
-          ))
+          </div>
         )}
         <AddServerForm
           onSubmit={(body) =>
@@ -188,7 +191,7 @@ export function IntegrationsList({
           }
           busy={busyId === "new-server" || isPending}
         />
-      </Section>
+      </section>
     </div>
   );
 }
@@ -235,7 +238,7 @@ function SearchBox({ initial }: { initial: string }) {
         aria-label="Search integrations"
       />
       <svg
-        className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-[#999] dark:text-[#666]"
+        className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-subtle"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -252,33 +255,29 @@ function SearchBox({ initial }: { initial: string }) {
   );
 }
 
-function Section({
+function SectionHead({
   title,
   count,
-  children,
+  hint,
 }: {
   title: string;
-  count?: number;
-  children: React.ReactNode;
+  count: number;
+  hint: string;
 }) {
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
-          {title}
-        </h2>
-        {count !== undefined ? (
-          <span className="text-xs text-[#999] dark:text-[#666]">{count}</span>
-        ) : null}
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <div>
+        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
       </div>
-      {children}
-    </section>
+      <span className="font-mono text-[11px] text-subtle">{count}</span>
+    </div>
   );
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded-xl border border-dashed border-[#e5e5e5] bg-white px-4 py-8 text-center text-sm text-[#666] dark:border-[#262626] dark:bg-neutral-950 dark:text-[#999]">
+    <p className="rounded-xl border border-dashed border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
       {children}
     </p>
   );
@@ -302,11 +301,13 @@ function ServerCard({
   const [showForm, setShowForm] = useState(false);
 
   return (
-    <article className="flex h-full flex-col gap-3 rounded-xl border border-[#e5e5e5] bg-white p-4 shadow-sm transition hover:border-[#d4d4d4] dark:border-[#262626] dark:bg-neutral-950 dark:hover:border-[#333]">
+    <article className="flex h-full flex-col gap-3 rounded-2xl border border-border bg-card p-4 transition hover:border-foreground/20">
       <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex min-w-0 items-start gap-3">
+          <ServerIcon server={server} />
+          <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-medium text-black dark:text-[#ededed]">
+            <h3 className="font-medium text-foreground">
               {server.name}
             </h3>
             {connection ? (
@@ -320,7 +321,7 @@ function ServerCard({
             ) : null}
           </div>
           {server.description ? (
-            <p className="line-clamp-2 text-sm leading-relaxed text-[#666] dark:text-[#999]">
+            <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
               {server.description}
             </p>
           ) : null}
@@ -329,7 +330,7 @@ function ServerCard({
               {server.categories.slice(0, 3).map((category) => (
                 <span
                   key={category}
-                  className="rounded-md bg-[#f5f5f5] px-1.5 py-0.5 text-[10px] font-medium text-[#666] dark:bg-[#1a1a1a] dark:text-[#999]"
+                  className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
                 >
                   {category}
                 </span>
@@ -337,7 +338,7 @@ function ServerCard({
             </div>
           ) : null}
           {connection?.accountLabel ? (
-            <p className="text-sm text-[#666] dark:text-[#999]">
+            <p className="text-sm text-muted-foreground">
               Connected as {connection.accountLabel}
             </p>
           ) : null}
@@ -347,11 +348,12 @@ function ServerCard({
             </p>
           ) : null}
           {server.connectStyle === "UNAVAILABLE" && !isConnected ? (
-            <p className="text-sm text-[#999] dark:text-[#666]">
+            <p className="text-sm text-subtle">
               Needs an OAuth application to be registered before it can be
               connected.
             </p>
           ) : null}
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -410,7 +412,7 @@ function ServerCard({
 
       {server.docsUrl ? (
         <a
-          className="text-sm font-medium text-black underline underline-offset-4 dark:text-[#ededed]"
+          className="text-sm font-medium text-foreground underline underline-offset-4"
           href={server.docsUrl}
           target="_blank"
           rel="noopener noreferrer"
@@ -430,6 +432,29 @@ function ServerCard({
  * username, password and region — and prefetching them for a catalog of
  * ~1500 would be thousands of upstream calls to render a list.
  */
+function ServerIcon({ server }: { server: McpServerView }) {
+  const [failed, setFailed] = useState(false);
+
+  if (server.iconUrl && !failed) {
+    return (
+      // External toolkit logos come from Composio; a broken URL falls back.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={server.iconUrl}
+        alt=""
+        className="size-10 shrink-0 rounded-xl border border-border bg-background object-cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-sm font-semibold text-foreground">
+      {server.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 function CredentialForm({
   server,
   busy,
@@ -480,27 +505,27 @@ function CredentialForm({
 
   if (!fields) {
     return (
-      <p className="text-sm text-[#666] dark:text-[#999]">Loading…</p>
+      <p className="text-sm text-muted-foreground">Loading…</p>
     );
   }
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-lg border border-[#ebebeb] p-4 dark:border-[#1a1a1a]"
+      className="flex flex-col gap-3 rounded-lg border border-border p-4"
       onSubmit={async (event) => {
         event.preventDefault();
         await onSubmit(values);
       }}
     >
       {fields.length === 0 ? (
-        <p className="text-sm text-[#666] dark:text-[#999]">
+        <p className="text-sm text-muted-foreground">
           {server.name} needs no credentials.
         </p>
       ) : (
         fields.map((field) => (
           <label
             key={field.name}
-            className="flex flex-col gap-1 text-sm text-[#666] dark:text-[#999]"
+            className="flex flex-col gap-1 text-sm text-muted-foreground"
           >
             {field.displayName}
             {field.required ? "" : " (optional)"}
@@ -519,7 +544,7 @@ function CredentialForm({
               }
             />
             {field.description ? (
-              <span className="text-xs text-[#999] dark:text-[#666]">
+              <span className="text-xs text-subtle">
                 {field.description}
               </span>
             ) : null}
@@ -567,7 +592,7 @@ function AddServerForm({
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-xl border border-[#ebebeb] p-4 dark:border-[#1a1a1a]"
+      className="flex flex-col gap-3 rounded-xl border border-border p-4"
       onSubmit={async (event) => {
         event.preventDefault();
         const succeeded = await onSubmit({
@@ -584,7 +609,7 @@ function AddServerForm({
         }
       }}
     >
-      <label className="flex flex-col gap-1 text-sm text-[#666] dark:text-[#999]">
+      <label className="flex flex-col gap-1 text-sm text-muted-foreground">
         Name
         <input
           className={input}
@@ -594,7 +619,7 @@ function AddServerForm({
           required
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm text-[#666] dark:text-[#999]">
+      <label className="flex flex-col gap-1 text-sm text-muted-foreground">
         Server URL
         <input
           className={input}
@@ -605,7 +630,7 @@ function AddServerForm({
           required
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm text-[#666] dark:text-[#999]">
+      <label className="flex flex-col gap-1 text-sm text-muted-foreground">
         API key (optional)
         <input
           className={input}

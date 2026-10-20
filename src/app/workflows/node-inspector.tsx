@@ -82,20 +82,20 @@ export function NodeInspector({
         ) : null}
 
         {tools.length > 0 ? (
-          <ul className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-[#ebebeb] dark:border-[#1a1a1a]">
+          <ul className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-white/5">
             {matches.length === 0 ? (
-              <li className={`px-2 py-2 ${hintClass}`}>Nothing matches that.</li>
+              <li className={`px-3 py-2 ${hintClass}`}>Nothing matches that.</li>
             ) : (
               matches.map((tool) => (
                 <li key={tool.toolSlug}>
                   <button
                     type="button"
-                    className={`flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] ${
-                      tool.toolSlug === toolSlug ? "bg-[#f2f2f2] dark:bg-[#1a1a1a]" : ""
+                    className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition hover:bg-white/10 ${
+                      tool.toolSlug === toolSlug ? "bg-brand/10" : ""
                     }`}
                     onClick={() => selectTool(tool.toolSlug)}
                   >
-                    <span className="font-mono text-[11px] text-black dark:text-[#ededed]">
+                    <span className="font-mono text-[11px] text-foreground">
                       {tool.toolSlug}
                     </span>
                     {tool.description ? (
@@ -112,7 +112,7 @@ export function NodeInspector({
       {!toolSlug ? (
         <p className={`mt-4 ${hintClass}`}>Pick a tool to see the arguments it takes.</p>
       ) : (
-        <section className="mt-4 border-t border-[#ebebeb] pt-3 dark:border-[#1a1a1a]">
+        <section className="mt-4 border-t border-border pt-3">
           <p className={labelClass}>Arguments</p>
           {selected ? (
             <>
@@ -195,13 +195,13 @@ function ArgumentForm({
               <label className={`${labelClass} font-mono`} htmlFor={fieldId}>
                 {parameter.name}
                 {parameter.required ? (
-                  <span className="ml-0.5 text-red-600 dark:text-red-400">*</span>
+                  <span className="ml-0.5 text-destructive">*</span>
                 ) : null}
               </label>
               <button
                 type="button"
                 title="Append a reference to the previous step's output"
-                className="cursor-pointer text-[10px] text-[#666] hover:text-black dark:text-[#999] dark:hover:text-[#ededed]"
+                className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground"
                 onClick={() => commit(parameter, `${draft}${PREVIOUS_OUTPUT}`)}
               >
                 + previous output
@@ -251,18 +251,18 @@ function ArgumentForm({
       })}
 
       {extras.length > 0 ? (
-        <div className="border-t border-[#ebebeb] pt-2 dark:border-[#1a1a1a]">
+        <div className="border-t border-border pt-2">
           <p className={labelClass}>Not accepted by this tool</p>
           <p className={`mt-0.5 ${hintClass}`}>Saved on the node, but dropped when it runs.</p>
           <ul className="mt-1 flex flex-col gap-1">
             {extras.map((key) => (
               <li key={key} className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-[11px] text-[#666] dark:text-[#999]">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
                   {key}
                 </span>
                 <button
                   type="button"
-                  className="cursor-pointer text-[10px] text-red-600 hover:underline dark:text-red-400"
+                  className="cursor-pointer text-[10px] text-destructive hover:underline"
                   onClick={() => removeExtra(key)}
                 >
                   remove

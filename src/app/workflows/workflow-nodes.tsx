@@ -2,100 +2,110 @@
 
 import { useContext } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Bot, Clock, Plug, Workflow } from "lucide-react";
 import type { FlowNode } from "@/lib/workflows/flow";
 import { isUnconfiguredTool } from "@/lib/workflows/graph";
 import { ScheduleContext, summarizeSchedule } from "./schedule-context";
 
 const shell =
-  "min-w-[200px] rounded-xl border bg-white px-3.5 py-3 shadow-sm transition dark:bg-neutral-950";
+  "relative min-w-[220px] overflow-hidden rounded-2xl border px-3.5 py-3 shadow-[0_12px_32px_-18px_rgb(0_0_0/0.35)] backdrop-blur-xl transition";
+
+const handleClass =
+  "!h-2.5 !w-2.5 !border-2 !border-card !bg-foreground";
+
+function Badge({
+  icon: Icon,
+  label,
+  className,
+}: {
+  icon: typeof Clock;
+  label: string;
+  className: string;
+}) {
+  return (
+    <p className={`flex items-center gap-1.5 text-[10px] font-semibold tracking-wide uppercase ${className}`}>
+      <Icon className="size-3" />
+      {label}
+    </p>
+  );
+}
 
 export function TriggerNode({ data }: NodeProps<FlowNode>) {
   const schedule = useContext(ScheduleContext);
   const summary = schedule ? summarizeSchedule(schedule) : null;
 
   return (
-    <div className={`${shell} border-neutral-900 dark:border-[#ededed]`}>
-      <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
-        Trigger
-      </p>
-      <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+    <div className={`${shell} border-foreground/25 bg-card/80`}>
+      <span className="absolute inset-y-0 left-0 w-0.5 bg-foreground" />
+      <Badge icon={Clock} label="Trigger" className="text-muted-foreground" />
+      <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {summary ? (
-        <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-[#666] dark:text-[#999]">
+        <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-muted-foreground">
           {summary.text}
-          {/* Called out because a saved-but-off schedule looks finished. */}
           {summary.off ? (
-            <span className="text-amber-700 dark:text-amber-500"> · Off</span>
+            <span className="text-[color:var(--warn)]"> · Off</span>
           ) : null}
         </p>
       ) : null}
-      <p className="mt-1 text-[10px] text-[#999] dark:text-[#666]">Click to schedule</p>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-white !bg-neutral-900 dark:!border-neutral-950 dark:!bg-[#ededed]"
-      />
+      <p className="mt-1.5 text-[10px] text-subtle">Click to schedule</p>
+      <Handle type="source" position={Position.Right} className={handleClass} />
     </div>
   );
 }
 
 export function ToolNode({ data }: NodeProps<FlowNode>) {
-  // Outlined because it otherwise looks finished and fails only at run time.
   const unconfigured = isUnconfiguredTool(data.toolSlug);
 
   return (
     <div
       className={`${shell} ${
         unconfigured
-          ? "border-dashed border-amber-400 dark:border-amber-600"
-          : "border-[#e5e5e5] dark:border-[#262626]"
+          ? "border-dashed border-warn/60 bg-warn/8"
+          : "border-live/25 bg-[color-mix(in_oklch,var(--live)_8%,var(--card))]"
       }`}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!h-3 !w-3 !border-2 !border-white !bg-neutral-900 dark:!border-neutral-950 dark:!bg-[#ededed]"
+      <span
+        className={`absolute inset-y-0 left-0 w-0.5 ${unconfigured ? "bg-warn" : "bg-live"}`}
       />
-      <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
-        {data.serverSlug ?? "Connection"}
-      </p>
-      <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+      <Handle type="target" position={Position.Left} className={`${handleClass} !bg-live`} />
+      <Badge
+        icon={Plug}
+        label={data.serverSlug ?? "Connection"}
+        className={unconfigured ? "text-[color:var(--warn)]" : "text-live"}
+      />
+      <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {unconfigured ? (
-        <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">Click to choose a tool</p>
+        <p className="mt-1 text-xs text-[color:var(--warn)]">Click to choose a tool</p>
       ) : (
-        <p className="mt-1 max-w-[240px] truncate font-mono text-[11px] text-[#999] dark:text-[#666]">
+        <p className="mt-1 max-w-[240px] truncate font-mono text-[11px] text-subtle">
           {data.toolSlug}
         </p>
       )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-white !bg-neutral-900 dark:!border-neutral-950 dark:!bg-[#ededed]"
-      />
+      <Handle type="source" position={Position.Right} className={`${handleClass} !bg-live`} />
     </div>
   );
 }
 
 export function LlmNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className={`${shell} border-violet-200 bg-violet-50/40 dark:border-violet-900 dark:bg-violet-950/20`}>
+    <div className={`${shell} border-brand/30 bg-[color-mix(in_oklch,var(--brand)_10%,var(--card))]`}>
+      <span className="absolute inset-y-0 left-0 w-0.5 bg-brand" />
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-3 !w-3 !border-2 !border-white !bg-violet-600 dark:!border-neutral-950 dark:!bg-violet-400"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-brand"
       />
-      <p className="text-[10px] font-semibold tracking-wide text-violet-700 uppercase dark:text-violet-300">
-        Model
-      </p>
-      <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+      <Badge icon={Bot} label="Model" className="text-brand" />
+      <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {data.instruction ? (
-        <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-[#666] dark:text-[#999]">
+        <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-muted-foreground">
           {data.instruction}
         </p>
       ) : null}
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-white !bg-violet-600 dark:!border-neutral-950 dark:!bg-violet-400"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-brand"
       />
     </div>
   );
@@ -103,20 +113,19 @@ export function LlmNode({ data }: NodeProps<FlowNode>) {
 
 export function BranchNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className={`${shell} border-amber-200 bg-amber-50/40 dark:border-amber-900 dark:bg-amber-950/20`}>
+    <div className={`${shell} border-warn/30 bg-warn/8`}>
+      <span className="absolute inset-y-0 left-0 w-0.5 bg-warn" />
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-3 !w-3 !border-2 !border-white !bg-amber-600 dark:!border-neutral-950 dark:!bg-amber-400"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-warn"
       />
-      <p className="text-[10px] font-semibold tracking-wide text-amber-700 uppercase dark:text-amber-300">
-        Branch
-      </p>
-      <p className="mt-0.5 text-sm font-medium text-black dark:text-[#ededed]">{data.label}</p>
+      <Badge icon={Workflow} label="Branch" className="text-[color:var(--warn)]" />
+      <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-3 !w-3 !border-2 !border-white !bg-amber-600 dark:!border-neutral-950 dark:!bg-amber-400"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-warn"
       />
     </div>
   );

@@ -1,14 +1,14 @@
 /** Class names shared by the studio and the inspector panels. */
 
 export const primaryButtonClass =
-  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
+  "inline-flex h-9 cursor-pointer items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-50";
 
 export const secondaryButtonClass =
-  "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
+  "inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 export const fieldClass =
-  "w-full rounded-lg border border-[#ebebeb] bg-transparent px-2 py-1.5 text-sm text-black outline-none focus:border-neutral-400 dark:border-[#1a1a1a] dark:text-[#ededed] dark:focus:border-[#444]";
+  "w-full rounded-xl border border-border bg-background/70 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
-export const labelClass = "text-xs font-medium text-black dark:text-[#ededed]";
-export const hintClass = "text-[11px] leading-snug text-[#666] dark:text-[#999]";
-export const errorClass = "text-[11px] text-red-600 dark:text-red-400";
+export const labelClass = "text-xs font-medium text-foreground";
+export const hintClass = "text-[11px] leading-snug text-muted-foreground";
+export const errorClass = "text-[11px] text-destructive";

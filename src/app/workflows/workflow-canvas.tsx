@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
@@ -29,6 +30,7 @@ import { UNCONFIGURED_TOOL, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { WorkflowSchedule } from "@/lib/workflows/schedule";
 import { NodeInspector } from "./node-inspector";
 import { ScheduleInspector, type SchedulePatch } from "./schedule-inspector";
+import { WorkflowEdge } from "./workflow-edges";
 import { BranchNode, LlmNode, ToolNode, TriggerNode } from "./workflow-nodes";
 
 const nodeTypes = {
@@ -36,6 +38,10 @@ const nodeTypes = {
   tool: ToolNode,
   llm: LlmNode,
   branch: BranchNode,
+};
+
+const edgeTypes = {
+  workflow: WorkflowEdge,
 };
 
 const MENU_RESULT_LIMIT = 5;
@@ -278,9 +284,9 @@ export function WorkflowCanvas({
   }, [connectionSearch, connections]);
 
   return (
-    <div className="relative h-full w-full bg-[#fafafa] dark:bg-[#0a0a0a]">
+    <div className="relative h-full w-full bg-canvas">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center p-3">
-        <p className="rounded-full border border-[#ebebeb]/80 bg-white/90 px-3 py-1 text-xs text-[#666] shadow-sm backdrop-blur dark:border-[#262626] dark:bg-neutral-950/90 dark:text-[#999]">
+        <p className="glass-morph rounded-full px-3 py-1 text-xs text-muted-foreground">
           Right-click empty canvas to add · Right-click node or connection to delete ·
           Select and press Delete
         </p>
@@ -290,6 +296,7 @@ export function WorkflowCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -340,21 +347,27 @@ export function WorkflowCanvas({
         deleteKeyCode={["Backspace", "Delete"]}
         elementsSelectable
         defaultEdgeOptions={{
-          style: { stroke: "#a3a3a3", strokeWidth: 2 },
-          className: "hover:!stroke-neutral-900 dark:hover:!stroke-[#ededed]",
+          type: "workflow",
+          animated: true,
         }}
+        proOptions={{ hideAttribution: true }}
       >
-        <Background gap={20} size={1} color="#e5e5e5" />
-        <Controls className="!rounded-xl !border-[#ebebeb] !shadow-md dark:!border-[#262626] dark:!bg-neutral-950" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.15} />
+        <Controls className="!overflow-hidden !rounded-2xl !border-white/10 !bg-card/70 !shadow-lg !backdrop-blur-xl" />
         <MiniMap
-          className="!rounded-xl !border-[#ebebeb] !shadow-md dark:!border-[#262626] dark:!bg-neutral-950"
-          maskColor="rgb(0 0 0 / 0.08)"
+          className="!overflow-hidden !rounded-2xl !border-white/10 !bg-card/70 !shadow-lg !backdrop-blur-xl"
+          nodeColor={(node) => {
+            if (node.type === "llm") return "var(--brand)";
+            if (node.type === "tool") return "var(--live)";
+            if (node.type === "branch") return "var(--warn)";
+            return "var(--foreground)";
+          }}
         />
       </ReactFlow>
 
       {menu ? (
         <div
-          className="fixed z-50 w-72 overflow-hidden rounded-xl border border-[#ebebeb] bg-white shadow-xl dark:border-[#262626] dark:bg-neutral-950"
+          className="glass-morph fixed z-50 w-72 overflow-hidden rounded-2xl"
           style={{ left: menu.x, top: menu.y }}
           role="menu"
           onPointerDown={(event) => event.stopPropagation()}
@@ -363,8 +376,8 @@ export function WorkflowCanvas({
         >
           {menu.kind === "pane" ? (
             <>
-              <div className="border-b border-[#ebebeb] px-3 py-2 dark:border-[#262626]">
-                <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
+              <div className="border-b border-border px-3 py-2">
+                <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
                   Add connection
                 </p>
                 <input
@@ -373,15 +386,15 @@ export function WorkflowCanvas({
                   value={connectionSearch}
                   onChange={(event) => setConnectionSearch(event.target.value)}
                   placeholder="Search integrations…"
-                  className="mt-2 h-8 w-full rounded-lg border border-[#ebebeb] bg-[#fafafa] px-2.5 text-sm text-black outline-none placeholder:text-[#999] focus:border-neutral-400 dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]"
+                  className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring"
                 />
               </div>
               {connections.length === 0 ? (
-                <p className="px-3 py-3 text-sm text-[#666] dark:text-[#999]">
+                <p className="px-3 py-3 text-sm text-muted-foreground">
                   No connections yet. Connect a tool under Integrations first.
                 </p>
               ) : filteredConnections.length === 0 ? (
-                <p className="px-3 py-3 text-sm text-[#666] dark:text-[#999]">
+                <p className="px-3 py-3 text-sm text-muted-foreground">
                   No matches for “{connectionSearch.trim()}”.
                 </p>
               ) : (
@@ -392,18 +405,18 @@ export function WorkflowCanvas({
                         <button
                           type="button"
                           role="menuitem"
-                          className="flex w-full flex-col items-start px-3 py-2.5 text-left transition hover:bg-[#f5f5f5] dark:hover:bg-[#1a1a1a]"
+                          className="flex w-full flex-col items-start px-3 py-2.5 text-left transition hover:bg-accent"
                           onClick={() => addConnectionNode(server)}
                         >
-                          <span className="text-sm font-medium text-black dark:text-[#ededed]">
+                          <span className="text-sm font-medium text-foreground">
                             {server.name}
                           </span>
                           {server.connection?.accountLabel ? (
-                            <span className="text-xs text-[#666] dark:text-[#999]">
+                            <span className="text-xs text-muted-foreground">
                               {server.connection.accountLabel}
                             </span>
                           ) : (
-                            <span className="font-mono text-xs text-[#999] dark:text-[#666]">
+                            <span className="font-mono text-xs text-subtle">
                               {server.slug}
                             </span>
                           )}
@@ -412,7 +425,7 @@ export function WorkflowCanvas({
                     ))}
                   </ul>
                   {totalMatches > MENU_RESULT_LIMIT ? (
-                    <p className="border-t border-[#ebebeb] px-3 py-2 text-xs text-[#999] dark:border-[#262626] dark:text-[#666]">
+                    <p className="border-t border-border px-3 py-2 text-xs text-subtle">
                       {totalMatches - MENU_RESULT_LIMIT} more — refine your search
                     </p>
                   ) : null}
@@ -423,13 +436,13 @@ export function WorkflowCanvas({
 
           {menu.kind === "node" ? (
             <div className="p-2">
-              <p className="px-2 py-1 text-xs text-[#666] dark:text-[#999]">
+              <p className="px-2 py-1 text-xs text-muted-foreground">
                 {menu.label}
               </p>
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full rounded-lg px-2 py-2 text-left text-sm text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                className="flex w-full rounded-lg px-2 py-2 text-left text-sm text-destructive transition hover:bg-destructive/10"
                 onClick={() => deleteNode(menu.nodeId)}
               >
                 Delete node
@@ -439,13 +452,13 @@ export function WorkflowCanvas({
 
           {menu.kind === "edge" ? (
             <div className="p-2">
-              <p className="px-2 py-1 text-xs text-[#666] dark:text-[#999]">
+              <p className="px-2 py-1 text-xs text-muted-foreground">
                 Connection
               </p>
               <button
                 type="button"
                 role="menuitem"
-                className="flex w-full rounded-lg px-2 py-2 text-left text-sm text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                className="flex w-full rounded-lg px-2 py-2 text-left text-sm text-destructive transition hover:bg-destructive/10"
                 onClick={() => deleteEdge(menu.edgeId)}
               >
                 Delete connection
