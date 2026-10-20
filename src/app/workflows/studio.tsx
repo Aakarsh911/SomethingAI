@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
-import { useEffect, useRef, useState } from "react";
-import { ReactFlowProvider } from "@xyflow/react";
 import type { McpServerView } from "@/lib/mcp/servers";
 import type { WorkflowGraph } from "@/lib/workflows/graph";
+import { UserButton } from "@clerk/nextjs";
+import { ReactFlowProvider } from "@xyflow/react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -56,7 +56,7 @@ type ModificationMessage = {
 };
 
 const primaryButton =
-  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
+  "h-9 cursor-pointer rounded-lg border border-transparent bg-black px-4 py-2 text-sm font-medium text-neutral-50 shadow-sm transition hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#ededed] dark:text-black dark:hover:bg-[#ccc]";
 
 const secondaryButton =
   "h-9 cursor-pointer rounded-lg border border-[#e5e5e5] bg-white px-4 text-sm font-medium text-black shadow-sm transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#262626] dark:bg-neutral-950 dark:text-[#ededed] dark:hover:bg-[#141414]";
@@ -426,11 +426,10 @@ function StudioInner({
                   <li key={workflow.id} className="group flex items-center gap-1.5">
                     <Link
                       href={`/workflows/${workflow.id}`}
-                      className={`min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-sm transition ${
-                        active
-                          ? "bg-black font-medium text-neutral-50 shadow-sm dark:bg-[#ededed] dark:text-black"
-                          : "text-black hover:bg-[#f5f5f5] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
-                      }`}
+                      className={`min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-sm transition ${active
+                        ? "bg-black font-medium text-neutral-50 shadow-sm dark:bg-[#ededed] dark:text-black"
+                        : "text-black hover:bg-[#f5f5f5] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
+                        }`}
                     >
                       {workflow.name}
                     </Link>
@@ -519,11 +518,10 @@ function StudioInner({
 
             {runResult ? (
               <div
-                className={`border-b px-4 py-2 text-sm ${
-                  runResult.status === "SUCCEEDED"
-                    ? "border-[#ebebeb] text-[#666] dark:border-[#1a1a1a] dark:text-[#999]"
-                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-                }`}
+                className={`border-b px-4 py-2 text-sm ${runResult.status === "SUCCEEDED"
+                  ? "border-[#ebebeb] text-[#666] dark:border-[#1a1a1a] dark:text-[#999]"
+                  : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+                  }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="font-medium">
@@ -653,11 +651,11 @@ function StudioInner({
               <h1 className="text-xl font-semibold tracking-[-0.4px]">
                 Select a workflow
               </h1>
-              <p className="mt-2 text-sm text-[#666] dark:text-[#999]">
+              <p className="my-3 text-sm text-[#666] dark:text-[#999]">
                 Create one in the sidebar, then right-click the canvas to add a
                 connected tool. Drag between handles to wire steps together.
               </p>
-              <Link href="/workflows/new" className={`${primaryButton} mt-5 inline-flex`}>
+              <Link href="/workflows/new" className={`${primaryButton} inline-flex`}>
                 Build with AI
               </Link>
             </div>
