@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
@@ -72,6 +72,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [traceRun, setTraceRun] = useState(0);
+  const threadRef = useRef<HTMLDivElement>(null);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -186,9 +187,18 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
 
   const empty = turns.length === 0 && !generating;
 
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || empty) return;
+    thread.scrollTo({ top: thread.scrollHeight });
+  }, [turns, generating, empty]);
+
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col px-6 min-[600px]:px-10">
-      <div className="min-h-0 flex-1 overflow-y-auto py-8">
+      <div
+        ref={threadRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {empty ? (
           <div className="flex flex-col items-center text-center">
             <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
@@ -328,7 +338,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
       </div>
 
       <AI_Prompt
-        className="mx-auto mb-4 w-full max-w-2xl py-2"
+        className="mx-auto mb-4 w-full max-w-2xl shrink-0 py-2"
         commands={[]}
         defaultModel="SomethingAI"
         disabled={!hasConnections}

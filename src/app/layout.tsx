@@ -30,12 +30,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <html
         lang="en"
         suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} h-full max-w-[100vw] overflow-x-hidden`}
+        className={`${geistSans.variable} ${geistMono.variable} h-full max-w-[100vw] overflow-x-clip`}
       >
         <head>
           <ThemeScript />
         </head>
-        <body className="flex min-h-full max-w-[100vw] flex-col overflow-x-hidden bg-background text-foreground antialiased">
+        <body className="flex min-h-full max-w-[100vw] flex-col overflow-x-clip bg-background text-foreground antialiased">
           {children}
         </body>
       </html>

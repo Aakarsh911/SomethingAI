@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Workflow,
 } from "lucide-react";
+import { ReadableAutomation } from "@/components/landing/after-hero";
 import { RunNotifications } from "@/components/landing/run-notifications";
 import { WorkflowPreview } from "@/components/landing/workflow-preview";
 
@@ -33,29 +34,6 @@ const STEPS = [
     lead: "Test first. Then switch it on.",
     body: "Walk the whole workflow without calling a tool. When it looks right, put it on a schedule. Every run is logged.",
     sample: "Test run · Nothing was sent",
-  },
-];
-
-const SPECS = [
-  {
-    title: "800+ tools through MCP",
-    body: "Connect Gmail, GitHub, Slack and hundreds more with OAuth or an API key. Bring your own MCP server if the catalog is missing one.",
-  },
-  {
-    title: "Edit by asking",
-    body: "“Also post it to Slack.” Changes compile into a new version of the graph, not a silent rewrite of the last prompt.",
-  },
-  {
-    title: "Safe test runs",
-    body: "Walk every step without sending mail, opening tickets, or calling a single tool. Live runs are a separate action.",
-  },
-  {
-    title: "Version history",
-    body: "Every save is a revision. Restore any of them in one click if an edit goes the wrong way.",
-  },
-  {
-    title: "Encrypted credentials",
-    body: "Tokens are sealed with AES-256-GCM at rest and refreshed for you. Nothing is shared between accounts.",
   },
 ];
 
@@ -113,29 +91,7 @@ export function ProductSections() {
         </ol>
       </section>
 
-      <section id="features" className="mx-auto mt-28 max-w-6xl scroll-mt-24 px-6">
-        <div className="grid gap-12 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-20">
-          <div className="lg:sticky lg:top-28 lg:self-start">
-            <p className="text-sm font-medium text-brand">Built for trust</p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
-              Automation you can actually read.
-            </h2>
-            <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-              No black boxes. Every workflow is a graph you inspect before it
-              touches an inbox, a ticket, or a channel.
-            </p>
-          </div>
-
-          <dl className="divide-y divide-border border-y border-border">
-            {SPECS.map((spec) => (
-              <div key={spec.title} className="grid gap-2 py-7 sm:grid-cols-[14rem_minmax(0,1fr)] sm:gap-8">
-                <dt className="text-[15px] font-semibold tracking-tight">{spec.title}</dt>
-                <dd className="text-sm leading-relaxed text-muted-foreground">{spec.body}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </section>
+      <ReadableAutomation />
 
       <section id="integrations" className="mx-auto mt-28 max-w-6xl scroll-mt-24 px-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

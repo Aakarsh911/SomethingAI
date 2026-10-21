@@ -442,14 +442,14 @@ function ServerIcon({ server }: { server: McpServerView }) {
       <img
         src={server.iconUrl}
         alt=""
-        className="size-10 shrink-0 rounded-xl border border-border bg-background object-cover"
+        className="size-10 shrink-0 rounded-xl bg-background object-cover"
         onError={() => setFailed(true)}
       />
     );
   }
 
   return (
-    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-sm font-semibold text-foreground">
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted text-sm font-semibold text-foreground">
       {server.name.slice(0, 1).toUpperCase()}
     </span>
   );

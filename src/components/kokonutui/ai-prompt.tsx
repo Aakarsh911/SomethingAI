@@ -1037,7 +1037,7 @@ export default function AI_Prompt({
             aria-autocomplete="list"
             aria-controls={menuOpen ? menuId : undefined}
             aria-expanded={menuOpen}
-            className="min-h-[56px] w-full resize-none rounded-none border-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-black leading-relaxed placeholder:text-black/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:bg-transparent dark:text-white dark:placeholder:text-white/70"
+            className="field-sizing-fixed max-h-[280px] min-h-[56px] w-full resize-none overflow-y-auto rounded-none border-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] text-black leading-relaxed [scrollbar-width:none] placeholder:text-black/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-50 dark:bg-transparent dark:text-white dark:placeholder:text-white/70 [&::-webkit-scrollbar]:hidden"
             disabled={disabled}
             id={textareaId}
             onBlur={() => setMenuDismissed(true)}
