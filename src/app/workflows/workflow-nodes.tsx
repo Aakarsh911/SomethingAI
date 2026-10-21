@@ -35,9 +35,9 @@ export function TriggerNode({ data }: NodeProps<FlowNode>) {
   const summary = schedule ? summarizeSchedule(schedule) : null;
 
   return (
-    <div className={`${shell} border-foreground/25 bg-card/80`}>
-      <span className="absolute inset-y-0 left-0 w-0.5 bg-foreground" />
-      <Badge icon={Clock} label="Trigger" className="text-muted-foreground" />
+    <div className={`${shell} border-g-blue/30 bg-card/90`}>
+      <span className="absolute inset-y-0 left-0 w-1 bg-g-blue" />
+      <Badge icon={Clock} label="Trigger" className="text-g-blue" />
       <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {summary ? (
         <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-muted-foreground">
@@ -60,18 +60,18 @@ export function ToolNode({ data }: NodeProps<FlowNode>) {
     <div
       className={`${shell} ${
         unconfigured
-          ? "border-dashed border-warn/60 bg-warn/8"
-          : "border-live/25 bg-[color-mix(in_oklch,var(--live)_8%,var(--card))]"
+          ? "border-dashed border-g-yellow bg-g-yellow/10"
+          : "border-g-green/30 bg-g-green/8"
       }`}
     >
       <span
-        className={`absolute inset-y-0 left-0 w-0.5 ${unconfigured ? "bg-warn" : "bg-live"}`}
+        className={`absolute inset-y-0 left-0 w-1 ${unconfigured ? "bg-g-yellow" : "bg-g-green"}`}
       />
-      <Handle type="target" position={Position.Left} className={`${handleClass} !bg-live`} />
+      <Handle type="target" position={Position.Left} className={`${handleClass} !bg-g-green`} />
       <Badge
         icon={Plug}
         label={data.serverSlug ?? "Connection"}
-        className={unconfigured ? "text-[color:var(--warn)]" : "text-live"}
+        className={unconfigured ? "text-[color:var(--warn)]" : "text-g-green"}
       />
       <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {unconfigured ? (
@@ -81,21 +81,21 @@ export function ToolNode({ data }: NodeProps<FlowNode>) {
           {data.toolSlug}
         </p>
       )}
-      <Handle type="source" position={Position.Right} className={`${handleClass} !bg-live`} />
+      <Handle type="source" position={Position.Right} className={`${handleClass} !bg-g-green`} />
     </div>
   );
 }
 
 export function LlmNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className={`${shell} border-brand/30 bg-[color-mix(in_oklch,var(--brand)_10%,var(--card))]`}>
-      <span className="absolute inset-y-0 left-0 w-0.5 bg-brand" />
+    <div className={`${shell} border-g-yellow/70 bg-g-yellow/12`}>
+      <span className="absolute inset-y-0 left-0 w-1 bg-g-yellow" />
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-brand"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-g-yellow"
       />
-      <Badge icon={Bot} label="Model" className="text-brand" />
+      <Badge icon={Bot} label="Model" className="text-[color:var(--warn)]" />
       <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {data.instruction ? (
         <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-muted-foreground">
@@ -105,7 +105,7 @@ export function LlmNode({ data }: NodeProps<FlowNode>) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-brand"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-g-yellow"
       />
     </div>
   );
@@ -113,19 +113,19 @@ export function LlmNode({ data }: NodeProps<FlowNode>) {
 
 export function BranchNode({ data }: NodeProps<FlowNode>) {
   return (
-    <div className={`${shell} border-warn/30 bg-warn/8`}>
-      <span className="absolute inset-y-0 left-0 w-0.5 bg-warn" />
+    <div className={`${shell} border-g-red/30 bg-g-red/8`}>
+      <span className="absolute inset-y-0 left-0 w-1 bg-g-red" />
       <Handle
         type="target"
         position={Position.Left}
-        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-warn"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-g-red"
       />
-      <Badge icon={Workflow} label="Branch" className="text-[color:var(--warn)]" />
+      <Badge icon={Workflow} label="Branch" className="text-g-red" />
       <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       <Handle
         type="source"
         position={Position.Right}
-        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-warn"
+        className="!h-2.5 !w-2.5 !border-2 !border-card !bg-g-red"
       />
     </div>
   );

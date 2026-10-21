@@ -284,9 +284,9 @@ export function WorkflowCanvas({
   }, [connectionSearch, connections]);
 
   return (
-    <div className="relative h-full w-full bg-canvas">
+    <div className="studio-wash relative h-full w-full">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center p-3">
-        <p className="glass-morph rounded-full px-3 py-1 text-xs text-muted-foreground">
+        <p className="rounded-full border border-border bg-card px-3 py-1 text-xs text-foreground/80 shadow-sm">
           Right-click empty canvas to add · Right-click node or connection to delete ·
           Select and press Delete
         </p>
@@ -353,21 +353,21 @@ export function WorkflowCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.15} />
-        <Controls className="!overflow-hidden !rounded-2xl !border-white/10 !bg-card/70 !shadow-lg !backdrop-blur-xl" />
+        <Controls className="!overflow-hidden !rounded-xl !border-border !bg-card !shadow-md" />
         <MiniMap
-          className="!overflow-hidden !rounded-2xl !border-white/10 !bg-card/70 !shadow-lg !backdrop-blur-xl"
+          className="!overflow-hidden !rounded-xl !border-border !bg-card !shadow-md"
           nodeColor={(node) => {
-            if (node.type === "llm") return "var(--brand)";
-            if (node.type === "tool") return "var(--live)";
-            if (node.type === "branch") return "var(--warn)";
-            return "var(--foreground)";
+            if (node.type === "llm") return "var(--g-yellow)";
+            if (node.type === "tool") return "var(--g-green)";
+            if (node.type === "branch") return "var(--g-red)";
+            return "var(--g-blue)";
           }}
         />
       </ReactFlow>
 
       {menu ? (
         <div
-          className="glass-morph fixed z-50 w-72 overflow-hidden rounded-2xl"
+          className="fixed z-50 w-72 overflow-hidden rounded-xl border border-border bg-card shadow-lg"
           style={{ left: menu.x, top: menu.y }}
           role="menu"
           onPointerDown={(event) => event.stopPropagation()}
@@ -377,9 +377,7 @@ export function WorkflowCanvas({
           {menu.kind === "pane" ? (
             <>
               <div className="border-b border-border px-3 py-2">
-                <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
-                  Add connection
-                </p>
+                <p className="text-xs font-medium text-foreground">Add a step</p>
                 <input
                   type="search"
                   autoFocus

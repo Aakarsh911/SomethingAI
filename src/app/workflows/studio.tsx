@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Sparkles, Trash2 } from "lucide-react";
-import AITextLoading from "@/components/kokonutui/ai-text-loading";
+import { Plus, Trash2 } from "lucide-react";
+import { AgentTrace } from "@/components/agent-trace";
 import HoldButton from "@/components/kokonutui/hold-button";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import {
@@ -80,7 +80,6 @@ function StudioInner({
   connections: McpServerView[];
 }) {
   const router = useRouter();
-  const [nameDraft, setNameDraft] = useState("");
   const [displayName, setDisplayName] = useState(selected?.name ?? "");
   const [graph, setGraph] = useState<WorkflowGraph | null>(selected?.graph ?? null);
   const [schedule, setSchedule] = useState<WorkflowSchedule | null>(
@@ -117,27 +116,6 @@ function StudioInner({
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
   }, []);
-
-  async function createWorkflow(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const name = nameDraft.trim();
-    if (!name) return;
-
-    setError(null);
-    const result = await requestJson<{ workflow: { id: string } }>("/api/workflows", {
-      method: "POST",
-      body: { name },
-      fallback: "Could not create the workflow.",
-    });
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-
-    setNameDraft("");
-    router.push(`/workflows/${result.data.workflow.id}`);
-    router.refresh();
-  }
 
   async function persistGraph(next: WorkflowGraph): Promise<boolean> {
     if (!selected) return false;
@@ -390,67 +368,48 @@ function StudioInner({
 
   return (
     <div className="flex h-full overflow-hidden bg-canvas">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-sidebar">
-        <form className="border-b border-border px-4 py-4" onSubmit={createWorkflow}>
-          <label className="mb-2 block text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-background">
+        <div className="flex items-center justify-between px-4 pt-4 pb-3">
+          <p className="text-sm font-semibold text-foreground">Workflows</p>
+          <span className="text-xs text-muted-foreground">{workflows.length}</span>
+        </div>
+        <div className="px-3 pb-3">
+          <Link href="/workflows/new" className={`${primaryButtonClass} w-full gap-1.5`}>
+            <Plus className="size-3.5" />
             New workflow
-          </label>
-          <div className="flex gap-2">
-            <input
-              className={fieldClass}
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              placeholder="Weekly report"
-              aria-label="New workflow name"
-            />
-            <button type="submit" className={primaryButtonClass} disabled={!nameDraft.trim()}>
-              Add
-            </button>
-          </div>
-        </form>
+          </Link>
+        </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <p className="mb-2 flex items-center justify-between px-2 text-[11px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
-            Your workflows
-            <span className="font-mono text-[10px] tracking-normal text-subtle">
-              {workflows.length}
-            </span>
-          </p>
+        <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {workflows.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-              No workflows yet. Create one above or start with AI.
+            <p className="px-2 py-6 text-sm text-muted-foreground">
+              Nothing here yet. New workflow starts from a description.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-col">
               {workflows.map((workflow) => {
                 const active = selected?.id === workflow.id;
                 return (
-                  <li key={workflow.id} className="group flex items-center gap-1">
+                  <li key={workflow.id} className="group flex items-center">
                     <Link
                       href={`/workflows/${workflow.id}`}
                       className={cn(
-                        "min-w-0 flex-1 rounded-lg px-3 py-2 text-sm transition",
+                        "min-w-0 flex-1 border-l-2 px-3 py-2.5 transition-colors",
                         active
-                          ? "bg-[color-mix(in_oklch,var(--brand)_12%,transparent)] font-medium text-foreground"
-                          : "text-foreground hover:bg-accent",
+                          ? "border-g-blue bg-g-blue/8"
+                          : "border-transparent hover:bg-muted",
                       )}
                     >
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "size-1.5 shrink-0 rounded-full",
-                            active ? "bg-brand" : "bg-foreground/20",
-                          )}
-                        />
-                        <span className="min-w-0 truncate">{workflow.name}</span>
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {workflow.name}
                       </span>
-                      <span className="mt-0.5 block pl-3.5 text-[11px] font-normal text-muted-foreground">
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
                         {relativeTime(workflow.updatedAt)}
                       </span>
                     </Link>
                     <button
                       type="button"
-                      className="rounded-lg p-2 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
+                      className="mr-1 rounded-md p-2 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => setPendingDelete(workflow)}
                       aria-label={`Delete ${workflow.name}`}
                     >
@@ -621,17 +580,12 @@ function StudioInner({
               </ReactFlowProvider>
               {modifying ? (
                 <div
-                  className="absolute inset-0 z-40 flex items-center justify-center bg-background/70 backdrop-blur-sm"
+                  className="absolute inset-x-0 bottom-4 z-40 flex justify-center px-4"
                   aria-label="Changing workflow"
                 >
-                  <AITextLoading
-                    texts={[
-                      "Reading the graph",
-                      "Rewiring the steps",
-                      "Saving a new version",
-                    ]}
-                    label="Changing the workflow"
-                  />
+                  <div className="w-full max-w-md rounded-2xl border border-border bg-card px-4 py-3 shadow-lg">
+                    <AgentTrace active preset="modify" />
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -684,31 +638,25 @@ function StudioInner({
             </div>
           </>
         ) : (
-          <div className="relative flex flex-1 flex-col items-center justify-center gap-4 overflow-hidden px-10 text-center">
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-0 [background:radial-gradient(50%_40%_at_50%_40%,color-mix(in_oklch,var(--brand)_12%,transparent),transparent)]"
-            />
-            <div className="glass-strong relative max-w-md rounded-3xl p-8">
-              <p className="text-[11px] font-medium tracking-[0.16em] text-brand uppercase">
-                Studio
-              </p>
-              <h1 className="mt-2 text-xl font-semibold tracking-tight">
-                Select a workflow
+          <div className="studio-wash relative flex flex-1 flex-col items-center justify-center px-10">
+            <div className="relative max-w-md">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                Open a workflow
               </h1>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                Create one in the sidebar, then right-click the canvas to add a
-                connected tool. Drag between handles to wire steps together.
+              <p className="mt-2 text-sm leading-relaxed text-foreground/80">
+                Pick one from the list, or describe a new one. On the canvas,
+                right-click to add a tool and drag between the handles to connect
+                steps.
               </p>
               <Link
                 href="/workflows/new"
                 className={`${primaryButtonClass} mt-5 inline-flex gap-1.5`}
               >
-                <Sparkles className="size-3.5" />
-                Build with AI
+                <Plus className="size-3.5" />
+                New workflow
               </Link>
             </div>
-            {error ? <p className="relative text-sm text-destructive">{error}</p> : null}
+            {error ? <p className="relative mt-4 text-sm text-destructive">{error}</p> : null}
           </div>
         )}
       </section>

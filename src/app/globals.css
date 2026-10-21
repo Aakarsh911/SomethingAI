@@ -50,6 +50,10 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-live: var(--live);
+  --color-g-blue: var(--g-blue);
+  --color-g-green: var(--g-green);
+  --color-g-yellow: var(--g-yellow);
+  --color-g-red: var(--g-red);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -67,25 +71,29 @@
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
-  --primary: oklch(0.21 0.006 285.885);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: #1a73e8;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --subtle: oklch(0.705 0.015 286.067);
+  --muted-foreground: #3c4043;
+  --subtle: #5f6368;
   --accent: oklch(0.967 0.001 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
-  --canvas: oklch(0.985 0 0);
-  --brand: oklch(0.541 0.281 293.009);
-  --brand-foreground: oklch(0.985 0 0);
-  --ok: oklch(0.62 0.17 155);
-  --warn: oklch(0.75 0.16 75);
-  --live: oklch(0.7 0.12 220);
+  --ring: #1a73e8;
+  --canvas: #f8f9fa;
+  --brand: #1a73e8;
+  --brand-foreground: #ffffff;
+  --ok: #1e8e3e;
+  --warn: #e37400;
+  --live: #1a73e8;
+  --g-blue: #1a73e8;
+  --g-green: #1e8e3e;
+  --g-yellow: #f9ab00;
+  --g-red: #d93025;
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -109,8 +117,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
+  --primary: #8ab4f8;
+  --primary-foreground: #202124;
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.235 0.006 286.033);
@@ -122,12 +130,16 @@
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.552 0.016 285.938);
-  --canvas: oklch(0.155 0.005 285.823);
-  --brand: oklch(0.702 0.183 293.541);
-  --brand-foreground: oklch(0.141 0.005 285.823);
-  --ok: oklch(0.78 0.16 155);
-  --warn: oklch(0.82 0.15 80);
-  --live: oklch(0.78 0.12 220);
+  --canvas: #202124;
+  --brand: #8ab4f8;
+  --brand-foreground: #202124;
+  --ok: #81c995;
+  --warn: #fdd663;
+  --live: #8ab4f8;
+  --g-blue: #8ab4f8;
+  --g-green: #81c995;
+  --g-yellow: #fdd663;
+  --g-red: #f28b82;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
@@ -207,10 +219,10 @@
 .react-flow {
   --xy-background-color: var(--canvas);
   --xy-background-pattern-color: color-mix(in oklch, var(--foreground) 14%, transparent);
-  --xy-edge-stroke: var(--brand);
-  --xy-edge-stroke-selected: var(--live);
+  --xy-edge-stroke: var(--g-blue);
+  --xy-edge-stroke-selected: var(--g-green);
+  --xy-connectionline-stroke: var(--g-blue);
   --xy-edge-stroke-width: 1.75;
-  --xy-connectionline-stroke: var(--brand);
   --xy-controls-button-background-color: var(--card);
   --xy-controls-button-background-color-hover: var(--accent);
   --xy-controls-button-color: var(--foreground);
@@ -227,4 +239,17 @@
 .react-flow__node.selected > div {
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--brand) 70%, transparent),
     0 8px 24px -8px color-mix(in oklch, var(--brand) 35%, transparent);
+}
+
+.studio-wash {
+  background-color: var(--canvas);
+  background-image:
+    radial-gradient(ellipse 48% 42% at 0% 0%, color-mix(in srgb, var(--g-blue) 28%, transparent), transparent 70%),
+    radial-gradient(ellipse 42% 38% at 100% 0%, color-mix(in srgb, var(--g-green) 22%, transparent), transparent 68%),
+    radial-gradient(ellipse 46% 40% at 100% 100%, color-mix(in srgb, var(--g-yellow) 26%, transparent), transparent 70%),
+    radial-gradient(ellipse 40% 36% at 0% 100%, color-mix(in srgb, var(--g-red) 16%, transparent), transparent 68%);
+}
+
+.studio-wash .react-flow {
+  --xy-background-color: transparent;
 }

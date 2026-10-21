@@ -23,12 +23,13 @@ export default async function NewWorkflowPage() {
   return (
     <div className="relative h-full overflow-hidden bg-canvas">
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-24 left-1/2 h-[28rem] w-[44rem] -translate-x-1/2 rounded-full bg-brand/25 blur-3xl" />
-        <div className="absolute top-1/3 -left-16 h-72 w-72 rounded-full bg-live/20 blur-3xl" />
-        <div className="absolute right-0 bottom-0 h-80 w-80 rounded-full bg-ok/15 blur-3xl" />
+        <div className="absolute -top-24 left-1/2 h-[28rem] w-[44rem] -translate-x-1/2 rounded-full bg-g-blue/20 blur-3xl" />
+        <div className="absolute top-1/3 -left-16 h-72 w-72 rounded-full bg-g-green/15 blur-3xl" />
+        <div className="absolute right-0 bottom-10 h-80 w-80 rounded-full bg-g-yellow/25 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-g-red/10 blur-3xl" />
       </div>
       <FlowField
-        className="text-brand/50 dark:text-brand/40"
+        className="text-g-blue/35 dark:text-g-blue/30"
         density={0.7}
         speed={0.7}
       />
@@ -37,7 +38,7 @@ export default async function NewWorkflowPage() {
         <header className="shrink-0 px-6 pt-6 min-[600px]:px-10">
           <Link
             href="/workflows"
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-muted-foreground backdrop-blur-xl transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted"
           >
             <ArrowLeft className="size-3.5" />
             Workflows

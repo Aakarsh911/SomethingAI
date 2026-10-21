@@ -386,9 +386,9 @@ function useStepTimes(steps: AgentStep[]) {
 }
 
 const LABEL_COLORS: Record<AgentStepStatus, string> = {
-  pending: "text-zinc-400 dark:text-zinc-500",
+  pending: "text-zinc-600 dark:text-zinc-300",
   running: "text-zinc-900 dark:text-zinc-100",
-  done: "text-zinc-500 dark:text-zinc-400",
+  done: "text-zinc-700 dark:text-zinc-300",
   error: "text-red-600 dark:text-red-400",
 };
 
@@ -502,7 +502,7 @@ export default function AILoadingState({
           <button
             aria-controls={listId}
             aria-expanded={isOpen}
-            className="group/header flex w-full items-center gap-2 rounded-md py-1 text-left font-medium text-sm text-zinc-600 outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-400/40 dark:text-zinc-300"
+            className="group/header flex w-full items-center gap-2 rounded-md py-1 text-left font-medium text-sm text-zinc-800 outline-hidden focus-visible:ring-2 focus-visible:ring-zinc-400/40 dark:text-zinc-100"
             onClick={() => setIsOpen((open) => !open)}
             type="button"
           >

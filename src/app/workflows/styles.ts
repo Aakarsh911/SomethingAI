@@ -7,7 +7,7 @@ export const secondaryButtonClass =
   "inline-flex h-9 cursor-pointer items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground shadow-sm transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50";
 
 export const fieldClass =
-  "w-full rounded-xl border border-border bg-background/70 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+  "w-full rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export const labelClass = "text-xs font-medium text-foreground";
 export const hintClass = "text-[11px] leading-snug text-muted-foreground";

@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ArrowUpRight } from "lucide-react";
+import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
-import AITextLoading from "@/components/kokonutui/ai-text-loading";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
 
@@ -70,6 +71,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [traceRun, setTraceRun] = useState(0);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -137,6 +139,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   function generate(text: string, signal?: AbortSignal) {
     const trimmed = text.trim();
     if (!trimmed || generating) return;
+    setTraceRun((current) => current + 1);
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
@@ -188,13 +191,10 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
       <div className="min-h-0 flex-1 overflow-y-auto py-8">
         {empty ? (
           <div className="flex flex-col items-center text-center">
-            <p className="text-[11px] font-medium tracking-[0.16em] text-brand uppercase">
-              New with AI
-            </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
+            <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
               Describe the busywork.
             </h1>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-3 max-w-md text-[15px] leading-relaxed text-foreground/80">
               You will see the steps before anything is saved. Nothing runs until
               you switch it on.
             </p>
@@ -202,7 +202,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         ) : null}
 
         {!hasConnections && (
-          <p className="mx-auto mt-8 max-w-lg text-center text-sm text-muted-foreground">
+          <p className="mx-auto mt-8 max-w-lg text-center text-sm text-foreground/80">
             You have no connected integrations yet, so there are no tools to build
             a workflow from.{" "}
             <a
@@ -216,19 +216,17 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         )}
 
         {empty && hasConnections ? (
-          <div className="mx-auto mt-10 flex max-w-lg flex-col items-center gap-3">
-            <p className="text-[11px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-              Try
-            </p>
+          <div className="mx-auto mt-8 flex w-full max-w-lg flex-col gap-2">
             {EXAMPLES.map((example) => (
               <button
                 key={example}
                 type="button"
                 onClick={() => generate(example)}
                 disabled={generating}
-                className="text-center text-sm leading-relaxed text-muted-foreground transition hover:text-foreground"
+                className="flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm leading-relaxed text-foreground shadow-sm transition hover:border-g-blue/50 hover:bg-g-blue/5 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {example}
+                <span className="min-w-0 flex-1">{example}</span>
+                <ArrowUpRight className="size-4 shrink-0 text-g-blue" />
               </button>
             ))}
           </div>
@@ -273,21 +271,21 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
                   <p className="text-base font-semibold tracking-tight text-foreground">
                     {draft.name}
                   </p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-foreground/80">
                     {draft.description}
                   </p>
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  <span className="mr-1.5 inline-block size-1.5 translate-y-[-1px] rounded-full bg-live" />
+                <p className="text-xs text-foreground/75">
+                  <span className="mr-1.5 inline-block size-1.5 translate-y-[-1px] rounded-full bg-g-green" />
                   {draft.scheduleLabel ?? "Runs only when you trigger it"}
                 </p>
 
                 <ol className="flex flex-col gap-3 border-l border-foreground/10 pl-4">
                   {draft.steps.map((step, i) => (
                     <li key={i} className="relative text-sm text-muted-foreground">
-                      <span className="absolute top-1.5 -left-[21px] size-2 rounded-full bg-brand/80" />
-                      <span className="font-mono text-[11px] text-subtle">
+                      <span className="absolute top-1.5 -left-[21px] size-2 rounded-full bg-g-blue" />
+                      <span className="font-mono text-[11px] text-muted-foreground">
                         {step.kind === "llm"
                           ? "model"
                           : `${step.serverSlug}/${step.toolSlug}`}
@@ -315,7 +313,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
                   >
                     Save workflow
                   </ParticleButton>
-                  <span className="text-xs text-subtle">
+                  <span className="text-xs text-foreground/70">
                     Saved switched off — you enable it when you are ready.
                   </span>
                 </div>
@@ -323,16 +321,8 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
             );
           })}
 
-          {generating ? (
-            <AITextLoading
-              className="items-start py-1"
-              texts={[
-                "Reading your tools",
-                "Choosing the steps",
-                "Drafting the graph",
-              ]}
-              label="Designing your workflow"
-            />
+          {traceRun > 0 ? (
+            <AgentTrace key={traceRun} active={generating} preset="generate" />
           ) : null}
         </div>
       </div>
