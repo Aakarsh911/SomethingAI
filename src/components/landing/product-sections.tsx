@@ -55,11 +55,9 @@ export function ProductSections() {
     <>
       <section id="product" className="relative z-10 -mt-28 scroll-mt-24 px-6">
         <div className="mx-auto max-w-6xl">
-          <div className="glass-strong rounded-[1.75rem] p-2 shadow-[0_40px_90px_-40px_rgb(0_0_0/0.45)] dark:shadow-[0_40px_90px_-36px_rgb(0_0_0/0.85)]">
-            <WorkflowPreview />
-          </div>
+          <WorkflowPreview />
 
-          <div className="mt-16">
+          <div className="mt-24 sm:mt-28">
             <RunNotifications />
           </div>
         </div>

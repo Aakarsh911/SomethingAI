@@ -183,6 +183,28 @@
   }
 }
 
+@keyframes compile-flow {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+
+@keyframes compile-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes compile-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .glass {
   background: color-mix(in oklch, var(--card) 68%, transparent);
   backdrop-filter: blur(22px) saturate(1.35);
