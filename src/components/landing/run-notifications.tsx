@@ -1,99 +1,138 @@
-import { CalendarClock, GitPullRequest, Mail, MessageSquare } from "lucide-react";
+"use client";
 
-type Run = {
-  id: string;
-  tool: string;
-  title: string;
-  detail: string;
-  time: string;
-  tint: string;
-  icon: React.ReactNode;
-};
+import { useRef } from "react";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrambleTextPlugin } from "gsap/ScrambleTextPlugin";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-const RUNS: Run[] = [
-  {
-    id: "run-1",
-    tool: "Slack",
-    title: "Monday digest sent",
-    detail: "23 emails and 6 open PRs → #eng-updates",
-    time: "now",
-    tint: "bg-[#4A154B]",
-    icon: <MessageSquare className="size-3.5" />,
-  },
-  {
-    id: "run-2",
-    tool: "Gmail",
-    title: "Follow-up labels applied",
-    detail: "4 threads from your manager",
-    time: "6:00",
-    tint: "bg-[#EA4335]",
-    icon: <Mail className="size-3.5" />,
-  },
-  {
-    id: "run-3",
-    tool: "GitHub",
-    title: "Stale PR reminder",
-    detail: "Pinged reviewers on 3 idle pull requests",
-    time: "Tue",
-    tint: "bg-zinc-900 dark:bg-zinc-200 dark:text-zinc-900",
-    icon: <GitPullRequest className="size-3.5" />,
-  },
-  {
-    id: "run-4",
-    tool: "Calendar",
-    title: "Tomorrow’s agenda drafted",
-    detail: "5 meetings, 2 conflicts flagged",
-    time: "Mon",
-    tint: "bg-[#4285F4]",
-    icon: <CalendarClock className="size-3.5" />,
-  },
+if (typeof window !== "undefined") {
+  gsap.registerPlugin(ScrambleTextPlugin, ScrollTrigger);
+}
+
+const PHRASES = [
+  "Monday digest sent",
+  "Follow-up labels applied",
+  "Stale PR reminder",
+  "Tomorrow’s agenda drafted",
 ];
 
-/** A product-shaped run log — not a notification toy. */
-export function RunNotifications() {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card">
-      <header className="flex items-center justify-between gap-4 border-b border-border px-5 py-3.5">
-        <div>
-          <p className="text-[11px] font-medium tracking-[0.16em] text-muted-foreground uppercase">
-            Overnight
-          </p>
-          <p className="mt-0.5 text-sm font-medium text-foreground">
-            4 runs · nothing failed
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-ok/25 bg-ok/10 px-2.5 py-1 text-[11px] font-medium text-ok">
-          <span className="size-1.5 rounded-full bg-ok" />
-          All succeeded
-        </span>
-      </header>
+const RIBBON = [
+  "Gmail",
+  "GitHub",
+  "Slack",
+  "Calendar",
+  "Notion",
+  "Linear",
+  "Jira",
+  "HubSpot",
+];
 
-      <ul className="divide-y divide-border">
-        {RUNS.map((run) => (
-          <li key={run.id} className="flex items-start gap-3 px-5 py-3.5">
+/** Kinetic type for the overnight runs. Scroll leans the ribbon. */
+export function RunNotifications() {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useGSAP(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const q = gsap.utils.selector(root);
+    const mm = gsap.matchMedia();
+
+    mm.add("(prefers-reduced-motion: no-preference)", () => {
+      const title = q("[data-scramble]")[0] as HTMLElement;
+      const track = q("[data-marquee]")[0] as HTMLElement;
+      let phrase = 0;
+      let scrollV = 0;
+      let skew = 0;
+      let x = 0;
+      let stopped = false;
+
+      const cycle = () => {
+        if (stopped) return;
+        phrase = (phrase + 1) % PHRASES.length;
+        gsap.to(title, {
+          duration: 1,
+          scrambleText: {
+            text: PHRASES[phrase],
+            chars: "lowerCase",
+            speed: 0.35,
+          },
+          onComplete: () => {
+            gsap.delayedCall(1.5, cycle);
+          },
+        });
+      };
+      gsap.delayedCall(1.4, cycle);
+
+      const trigger = ScrollTrigger.create({
+        trigger: root,
+        start: "top bottom",
+        end: "bottom top",
+        onUpdate: (self) => {
+          scrollV = self.getVelocity();
+        },
+      });
+
+      const tick = () => {
+        scrollV *= 0.88;
+        const width = track.scrollWidth / 2;
+        if (!width) return;
+        const dt = gsap.ticker.deltaRatio(60);
+        x = gsap.utils.wrap(-width, 0, x - (1.15 + scrollV / -3500) * dt);
+        skew += (gsap.utils.clamp(-7, 7, scrollV / -700) - skew) * 0.12;
+        gsap.set(track, { x, skewX: skew });
+      };
+      gsap.ticker.add(tick);
+
+      return () => {
+        stopped = true;
+        gsap.ticker.remove(tick);
+        trigger.kill();
+      };
+    });
+
+    return () => mm.revert();
+  }, { scope: rootRef });
+
+  const words = [...RIBBON, ...RIBBON];
+
+  return (
+    <div ref={rootRef} className="overflow-hidden">
+      <p className="text-sm font-medium text-brand">Overnight</p>
+      <h3
+        data-scramble
+        className="mt-3 max-w-3xl text-3xl font-semibold tracking-[-0.04em] text-balance sm:text-5xl"
+      >
+        Monday digest sent
+      </h3>
+      <p className="mt-4 max-w-md text-sm leading-relaxed text-foreground/80 sm:text-base">
+        Four runs finished. Nothing was sent.
+      </p>
+
+      <div className="relative mt-10 overflow-hidden">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-background to-transparent sm:w-24"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-background to-transparent sm:w-24"
+        />
+        <div data-marquee className="flex w-max items-center gap-8 py-2 sm:gap-12">
+          {words.map((word, index) => (
             <span
-              className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-white ${run.tint}`}
+              key={`${word}-${index}`}
+              className={
+                index % 2
+                  ? "text-4xl font-semibold tracking-[-0.04em] text-transparent [-webkit-text-stroke:1.5px_var(--foreground)] sm:text-6xl"
+                  : "text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-6xl"
+              }
             >
-              {run.icon}
+              {word}
             </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-3">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {run.title}
-                </p>
-                <time className="shrink-0 font-mono text-[11px] text-subtle">
-                  {run.time}
-                </time>
-              </div>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {run.tool}
-                <span className="text-subtle"> · </span>
-                {run.detail}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ul>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

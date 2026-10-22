@@ -664,6 +664,39 @@ export default function NotificationStack({
   );
 }
 
+/** One notification card, the same chrome as the stack. */
+export function NotificationCard({
+  item,
+  className,
+}: {
+  item: Pick<StackNotification, "title" | "body" | "icon"> & { time?: string };
+  className?: string;
+}) {
+  return (
+    <article
+      className={cn(
+        "relative flex select-none gap-3 rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900",
+        className,
+      )}
+    >
+      {item.icon ? <div className="shrink-0">{item.icon}</div> : null}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="font-medium text-sm text-zinc-900 text-pretty dark:text-zinc-100">
+            {item.title}
+          </p>
+          {item.time ? (
+            <span className="shrink-0 text-xs text-zinc-400 tabular-nums">{item.time}</span>
+          ) : null}
+        </div>
+        {item.body ? (
+          <p className="truncate text-sm text-zinc-500 dark:text-zinc-400">{item.body}</p>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 function NotificationContent({
   item,
   muted,

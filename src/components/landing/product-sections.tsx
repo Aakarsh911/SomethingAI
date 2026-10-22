@@ -59,7 +59,7 @@ export function ProductSections() {
             <WorkflowPreview />
           </div>
 
-          <div className="mt-8">
+          <div className="mt-16">
             <RunNotifications />
           </div>
         </div>
