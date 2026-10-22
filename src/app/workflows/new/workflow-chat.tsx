@@ -8,7 +8,6 @@ import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
-import SpeechRecognition from "react-speech-recognition";
 
 const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
   ssr: false
@@ -150,7 +149,6 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     if (!trimmed || generating) return;
     setTraceRun((current) => current + 1);
     setShouldResetTranscript(true);
-    SpeechRecognition.stopListening();
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
