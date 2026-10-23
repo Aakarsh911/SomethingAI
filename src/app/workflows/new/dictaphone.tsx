@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaStop } from "react-icons/fa";
 
 export function Dictaphone({
   onTranscriptChange,
   shouldReset,
-  onClear
+  onClear,
+  onStopRecording
 }: {
   onTranscriptChange: (text: string) => void;
   shouldReset?: boolean;
-  onClear?: () => void
+  onClear?: () => void;
+  onStopRecording?: (stopFn: () => void) => void;
 }) {
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -23,13 +24,52 @@ export function Dictaphone({
 
   useEffect(() => {
     if (shouldReset) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTranscript("");
       transcriptRef.current = "";
       finalTranscriptsRef.current = [];
       onTranscriptChange("");
     }
   }, [shouldReset, onTranscriptChange]);
+
+  const stopRecording = useCallback(() => {
+    // Send end-of-stream signal
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send('');
+      wsRef.current.close();
+    }
+    wsRef.current = null;
+
+    // Stop audio processing
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Stop the stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    setIsRecording(false);
+
+    if (onClear) {
+      transcriptRef.current = "";
+      finalTranscriptsRef.current = [];
+      onTranscriptChange("");
+      onClear();
+    }
+  }, [onClear, onTranscriptChange]);
+
+  useEffect(() => {
+    if (onStopRecording) {
+      onStopRecording(stopRecording);
+    }
+  }, [onStopRecording, stopRecording]);
 
   const startRecording = async () => {
     try {
@@ -100,7 +140,6 @@ export function Dictaphone({
             // Update display with partial + all finals
             const partial = msg.partial_utterance.text;
             const allText = [...finalTranscriptsRef.current, partial].join(' ');
-            setTranscript(allText);
             transcriptRef.current = allText;
             onTranscriptChange(allText);
           } else if (msg.type === 'utterance') {
@@ -109,7 +148,6 @@ export function Dictaphone({
             if (finalText.trim()) {
               finalTranscriptsRef.current.push(finalText);
               const allText = finalTranscriptsRef.current.join(' ');
-              setTranscript(allText);
               transcriptRef.current = allText;
               onTranscriptChange(allText);
             }
@@ -136,42 +174,6 @@ export function Dictaphone({
     } catch (error) {
       console.error('Error accessing microphone:', error);
       alert('Could not access microphone. Please check permissions.');
-    }
-  };
-
-  const stopRecording = () => {
-    // Send end-of-stream signal
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send('');
-      wsRef.current.close();
-    }
-    wsRef.current = null;
-
-    // Stop audio processing
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-
-    // Stop the stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    setIsRecording(false);
-
-    if (onClear) {
-      setTranscript("");
-      transcriptRef.current = "";
-      finalTranscriptsRef.current = [];
-      onTranscriptChange("");
-      onClear();
     }
   };
 

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import SpeechRecognition from "react-speech-recognition";
 
 const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
@@ -74,6 +74,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
+  const stopRecordingRef = useRef<(() => void) | null>(null);
 
   const handleTranscriptChange = useCallback((text: string) => {
     setPrompt(text);
@@ -149,6 +150,10 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     setPrompt("");
     setShouldResetTranscript(true);
     SpeechRecognition.stopListening();
+    // Stop Dictaphone recording if active
+    if (stopRecordingRef.current) {
+      stopRecordingRef.current();
+    }
     void send([...messages, { role: "user", content: trimmed }], [
       { role: "user", text: trimmed },
     ]);
@@ -341,7 +346,12 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
             placeholder="Describe what you want to automate…"
             className="w-full rounded-xl border border-[#ebebeb] px-4 py-3 pr-12 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
           />
-          <Dictaphone onTranscriptChange={handleTranscriptChange} shouldReset={shouldResetTranscript} onClear={handleClear} />
+          <Dictaphone
+            onTranscriptChange={handleTranscriptChange}
+            shouldReset={shouldResetTranscript}
+            onClear={handleClear}
+            onStopRecording={(stopFn) => { stopRecordingRef.current = stopFn; }}
+          />
         </div>
         <button
           type="submit"
