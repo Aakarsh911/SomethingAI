@@ -14,94 +14,124 @@ export function Dictaphone({
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
   const transcriptRef = useRef("");
+  const finalTranscriptsRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (shouldReset) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTranscript("");
       transcriptRef.current = "";
+      finalTranscriptsRef.current = [];
       onTranscriptChange("");
     }
-
   }, [shouldReset, onTranscriptChange]);
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm',
-      });
+      // Get API configuration
+      const configResponse = await fetch('/api/transcribe-config');
+      if (!configResponse.ok) {
+        throw new Error('Failed to get API configuration');
+      }
+      const { apiKey } = await configResponse.json();
 
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      // Get microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000,
+          channelCount: 1
         }
+      });
+      streamRef.current = stream;
+
+      // Create WebSocket connection directly to Modulate
+      const modulateUrl =
+        `wss://platform.modulate.ai/api/velma-2-stt-streaming-english-v2` +
+        `?api_key=${apiKey}` +
+        `&audio_format=s16le` +
+        `&sample_rate=16000` +
+        `&num_channels=1` +
+        `&endpointing=true`;
+
+      const ws = new WebSocket(modulateUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+
+        // Set up audio processing
+        const audioContext = new AudioContext({ sampleRate: 16000 });
+        audioContextRef.current = audioContext;
+
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        processorRef.current = processor;
+
+        processor.onaudioprocess = (e) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            const inputData = e.inputBuffer.getChannelData(0);
+            // Convert float32 to int16
+            const int16Data = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              const s = Math.max(-1, Math.min(1, inputData[i]));
+              int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            ws.send(int16Data.buffer);
+          }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-        // Send to Whisper API for transcription
-        const formData = new FormData();
-        formData.append('audio', audioBlob, 'recording.webm');
-
+      ws.onmessage = (event) => {
         try {
-          const response = await fetch('/api/transcribe', {
-            method: 'POST',
-            body: formData,
-          });
+          const msg = JSON.parse(event.data);
 
-          if (response.ok) {
-            const data = await response.json();
-            const newText = data.text;
-
-            // Append to existing transcript using ref to avoid stale closure
-            const updatedTranscript = transcriptRef.current
-              ? `${transcriptRef.current} ${newText}`
-              : newText;
-
-            transcriptRef.current = updatedTranscript;
-            setTranscript(updatedTranscript);
-            onTranscriptChange(updatedTranscript);
-          } else {
-            console.error('Transcription failed:', await response.text());
+          if (msg.type === 'partial_utterance') {
+            // Update display with partial + all finals
+            const partial = msg.partial_utterance.text;
+            const allText = [...finalTranscriptsRef.current, partial].join(' ');
+            setTranscript(allText);
+            transcriptRef.current = allText;
+            onTranscriptChange(allText);
+          } else if (msg.type === 'utterance') {
+            // Add final utterance to our list
+            const finalText = msg.utterance.text;
+            if (finalText.trim()) {
+              finalTranscriptsRef.current.push(finalText);
+              const allText = finalTranscriptsRef.current.join(' ');
+              setTranscript(allText);
+              transcriptRef.current = allText;
+              onTranscriptChange(allText);
+            }
+          } else if (msg.type === 'done') {
+            console.log('Transcription complete');
+          } else if (msg.type === 'error') {
+            console.error('Transcription error:', msg.error);
           }
         } catch (error) {
-          console.error('Error sending audio for transcription:', error);
+          console.error('Error parsing message:', error);
         }
-
-        // Clean up
-        audioChunksRef.current = [];
-        stream.getTracks().forEach(track => track.stop());
       };
 
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+      };
+
       setIsRecording(true);
-
-      // Auto-send audio chunks every 3 seconds for real-time transcription
-      const interval = setInterval(() => {
-        if (mediaRecorder.state === 'recording') {
-          mediaRecorder.stop();
-          // Restart recording for continuous capture
-          setTimeout(() => {
-            // Check if still recording via ref instead of stale closure
-            if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-              audioChunksRef.current = [];
-              mediaRecorder.start();
-            }
-          }, 100);
-        }
-      }, 3000);
-
-      // Store interval ID for cleanup
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (mediaRecorder as any).intervalId = interval;
 
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -110,23 +140,38 @@ export function Dictaphone({
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      // Clear the interval
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const intervalId = (mediaRecorderRef.current as any).intervalId;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
+    // Send end-of-stream signal
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send('');
+      wsRef.current.close();
+    }
+    wsRef.current = null;
 
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
+    // Stop audio processing
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
 
-      if (onClear) {
-        setTranscript("");
-        transcriptRef.current = "";
-        onTranscriptChange("");
-        onClear();
-      }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Stop the stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    setIsRecording(false);
+
+    if (onClear) {
+      setTranscript("");
+      transcriptRef.current = "";
+      finalTranscriptsRef.current = [];
+      onTranscriptChange("");
+      onClear();
     }
   };
 
