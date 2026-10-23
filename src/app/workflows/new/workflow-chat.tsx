@@ -80,6 +80,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const threadRef = useRef<HTMLDivElement>(null);
   const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const stopRecordingRef = useRef<(() => void) | null>(null);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -149,6 +150,10 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     if (!trimmed || generating) return;
     setTraceRun((current) => current + 1);
     setShouldResetTranscript(true);
+    // Stop Dictaphone recording if active
+    if (stopRecordingRef.current) {
+      stopRecordingRef.current();
+    }
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
@@ -207,6 +212,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         ref={threadRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
+<<<<<<< HEAD
 <<<<<<< HEAD
         {empty ? (
           <div className="flex flex-col items-center text-center">
@@ -362,7 +368,11 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           }}
         />
         <div className="absolute right-16 bottom-[22px] z-10 pointer-events-auto">
-          <Dictaphone promptInputRef={promptInputRef} shouldReset={shouldResetTranscript} />
+          <Dictaphone
+            promptInputRef={promptInputRef}
+            shouldReset={shouldResetTranscript}
+            onStopRecording={(stopFn) => { stopRecordingRef.current = stopFn; }}
+          />
         </div>
       </div>
     </div>

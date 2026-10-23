@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaStop } from "react-icons/fa";
 
 export function Dictaphone({
   promptInputRef,
-  shouldReset
+  shouldReset,
+  onStopRecording
 }: {
   promptInputRef?: React.RefObject<HTMLTextAreaElement>;
   shouldReset?: boolean;
+  onStopRecording?: (stopFn: () => void) => void;
 }) {
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -21,7 +22,6 @@ export function Dictaphone({
 
   useEffect(() => {
     if (shouldReset) {
-      setTranscript("");
       transcriptRef.current = "";
       finalTranscriptsRef.current = [];
       // Clear the textarea
@@ -37,20 +37,52 @@ export function Dictaphone({
     }
   }, [shouldReset]);
 
-  useEffect(() => {
-    if (transcript) {
-      // Find the textarea in the AI_Prompt component and update it
-      const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
-      if (textarea) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-        if (nativeInputValueSetter) {
-          nativeInputValueSetter.call(textarea, transcript);
-          const event = new Event('input', { bubbles: true });
-          textarea.dispatchEvent(event);
-        }
+  const updateTextarea = useCallback((text: string) => {
+    // Find the textarea in the AI_Prompt component and update it
+    const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
+    if (textarea) {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(textarea, text);
+        const event = new Event('input', { bubbles: true });
+        textarea.dispatchEvent(event);
       }
     }
-  }, [transcript]);
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    // Send end-of-stream signal
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send('');
+      wsRef.current.close();
+    }
+    wsRef.current = null;
+
+    // Stop audio processing
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Stop the stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    setIsRecording(false);
+  }, []);
+
+  useEffect(() => {
+    if (onStopRecording) {
+      onStopRecording(stopRecording);
+    }
+  }, [onStopRecording, stopRecording]);
 
   const startRecording = async () => {
     try {
@@ -121,16 +153,16 @@ export function Dictaphone({
             // Update display with partial + all finals
             const partial = msg.partial_utterance.text;
             const allText = [...finalTranscriptsRef.current, partial].join(' ');
-            setTranscript(allText);
             transcriptRef.current = allText;
+            updateTextarea(allText);
           } else if (msg.type === 'utterance') {
             // Add final utterance to our list
             const finalText = msg.utterance.text;
             if (finalText.trim()) {
               finalTranscriptsRef.current.push(finalText);
               const allText = finalTranscriptsRef.current.join(' ');
-              setTranscript(allText);
               transcriptRef.current = allText;
+              updateTextarea(allText);
             }
           } else if (msg.type === 'done') {
             console.log('Transcription complete');
@@ -156,34 +188,6 @@ export function Dictaphone({
       console.error('Error accessing microphone:', error);
       alert('Could not access microphone. Please check permissions.');
     }
-  };
-
-  const stopRecording = () => {
-    // Send end-of-stream signal
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send('');
-      wsRef.current.close();
-    }
-    wsRef.current = null;
-
-    // Stop audio processing
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-
-    // Stop the stream
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    setIsRecording(false);
   };
 
   return !isRecording ? (
