@@ -26,14 +26,48 @@ export async function POST(request: Request) {
       );
     }
 
+    // Check if audio file is too small (likely silence)
+    // Typical webm with actual speech is at least 5KB for 3 seconds
+    if (audioFile.size < 5000) {
+      return Response.json({ text: "" });
+    }
+
     // Transcribe using Whisper
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: "whisper-1",
       language: "en",
+      response_format: "verbose_json",
     });
 
-    return Response.json({ text: transcription.text });
+    // Filter out common Whisper hallucinations and check confidence
+    const text = transcription.text?.trim() || "";
+
+    // Common hallucinations that Whisper generates from silence
+    const hallucinations = [
+      "thank you",
+      "thanks for watching",
+      "bye",
+      "bye bye",
+      "you",
+      ".",
+      "",
+      "this is a transcription of a user speaking clearly"
+    ];
+
+    const lowerText = text.toLowerCase();
+
+    // Check if it's a hallucination
+    if (hallucinations.some(h => lowerText.includes(h) && lowerText.length < 50)) {
+      return Response.json({ text: "" });
+    }
+
+    // If no segments or very low confidence, it's likely silence
+    if (!transcription.segments || transcription.segments.length === 0) {
+      return Response.json({ text: "" });
+    }
+
+    return Response.json({ text: text });
   } catch (error) {
     console.error("Transcription error:", error);
     return Response.json(
