@@ -2,10 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
+import { Plus, Trash2 } from "lucide-react";
+import { AgentTrace } from "@/components/agent-trace";
+import HoldButton from "@/components/kokonutui/hold-button";
+import ParticleButton from "@/components/kokonutui/particle-button";
+import {
+  StatusIsland,
+  type IslandTask,
+} from "@/components/kokonutui/status-island";
 import type { McpServerView } from "@/lib/mcp/servers";
+import { cn } from "@/lib/utils";
 import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { RunSummary } from "@/lib/workflows/runtime";
 import type { WorkflowSchedule } from "@/lib/workflows/schedule";
@@ -13,7 +21,7 @@ import type { WorkflowVersionView } from "@/lib/workflows/store";
 import { requestJson } from "./request-json";
 import { ScheduleContext } from "./schedule-context";
 import type { SchedulePatch } from "./schedule-inspector";
-import { primaryButtonClass, secondaryButtonClass } from "./styles";
+import { fieldClass, primaryButtonClass, secondaryButtonClass } from "./styles";
 import { WorkflowCanvas } from "./workflow-canvas";
 
 export type WorkflowListItem = {
@@ -49,9 +57,6 @@ type ModificationMessage = {
   content: string;
 };
 
-const ghostLink =
-  "rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#666] transition hover:bg-[#f5f5f5] hover:text-black dark:text-[#999] dark:hover:bg-[#1a1a1a] dark:hover:text-[#ededed]";
-
 export function WorkflowStudio(props: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
@@ -75,7 +80,6 @@ function StudioInner({
   connections: McpServerView[];
 }) {
   const router = useRouter();
-  const [nameDraft, setNameDraft] = useState("");
   const [displayName, setDisplayName] = useState(selected?.name ?? "");
   const [graph, setGraph] = useState<WorkflowGraph | null>(selected?.graph ?? null);
   const [schedule, setSchedule] = useState<WorkflowSchedule | null>(
@@ -112,27 +116,6 @@ function StudioInner({
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
   }, []);
-
-  async function createWorkflow(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const name = nameDraft.trim();
-    if (!name) return;
-
-    setError(null);
-    const result = await requestJson<{ workflow: { id: string } }>("/api/workflows", {
-      method: "POST",
-      body: { name },
-      fallback: "Could not create the workflow.",
-    });
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-
-    setNameDraft("");
-    router.push(`/workflows/${result.data.workflow.id}`);
-    router.refresh();
-  }
 
   async function persistGraph(next: WorkflowGraph): Promise<boolean> {
     if (!selected) return false;
@@ -293,7 +276,9 @@ function StudioInner({
    * cannot see on the canvas would be indefensible.
    */
   async function runNow(dryRun: boolean) {
-    if (!selected || !graph || running) return;
+    if (!selected || !graph || running) {
+      throw new Error("Nothing to run yet.");
+    }
 
     setRunning(dryRun ? "dry" : "live");
     setRunResult(null);
@@ -306,7 +291,7 @@ function StudioInner({
 
     if (!(await persistGraph(graph))) {
       setRunning(false);
-      return;
+      throw new Error("Could not save before running.");
     }
 
     // A run that outlasts the server's wait answers 202: a message, no `run`.
@@ -318,14 +303,18 @@ function StudioInner({
 
     if (!result.ok) {
       setError(result.error);
-      return;
+      throw new Error(result.error);
     }
     if (!result.data.run) {
-      setError(result.data.error ?? "Could not run the workflow.");
-      return;
+      const message = result.data.error ?? "Could not run the workflow.";
+      setError(message);
+      throw new Error(message);
     }
     setRunResult({ ...result.data.run, dryRun });
     router.refresh();
+    if (result.data.run.status === "FAILED") {
+      throw new Error(result.data.run.error ?? "Run failed.");
+    }
   }
 
   async function confirmDelete() {
@@ -349,82 +338,82 @@ function StudioInner({
     router.refresh();
   }
 
+  const islandTasks = useMemo<IslandTask[]>(() => {
+    if (running !== false) {
+      return [
+        {
+          id: "run",
+          label: running === "dry" ? "Walking the graph" : "Running workflow",
+          detail: displayName,
+          status: "running",
+        },
+      ];
+    }
+    if (!runResult) return [];
+    return [
+      {
+        id: runResult.runId,
+        label: runResult.dryRun ? "Test run" : "Run",
+        detail:
+          runResult.status === "SUCCEEDED"
+            ? runResult.dryRun
+              ? "Nothing was sent"
+              : "Finished"
+            : (runResult.error ?? "Failed"),
+        status: runResult.status === "SUCCEEDED" ? "done" : "error",
+        action: { label: "Dismiss", onClick: () => setRunResult(null) },
+      },
+    ];
+  }, [displayName, runResult, running]);
+
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[#fafafa] dark:bg-[#0a0a0a]">
-      <aside className="flex w-80 shrink-0 flex-col border-r border-[#ebebeb] bg-white dark:border-[#262626] dark:bg-neutral-950">
-        <div className="border-b border-[#ebebeb] px-5 py-5 dark:border-[#262626]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <Link
-                href="/workflows"
-                className="text-base font-semibold tracking-[-0.3px] text-black dark:text-[#ededed]"
-              >
-                Workflows
-              </Link>
-              <p className="mt-0.5 text-xs text-[#666] dark:text-[#999]">
-                Build and run automations
-              </p>
-            </div>
-            <UserButton />
-          </div>
-          <div className="mt-4 flex gap-2">
-            <Link href="/workflows/new" className={ghostLink}>
-              New with AI
-            </Link>
-            <Link href="/settings/integrations" className={ghostLink}>
-              Integrations
-            </Link>
-          </div>
+    <div className="flex h-full overflow-hidden bg-canvas">
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-background">
+        <div className="flex items-center justify-between px-4 pt-4 pb-3">
+          <p className="text-sm font-semibold text-foreground">Workflows</p>
+          <span className="text-xs text-muted-foreground">{workflows.length}</span>
+        </div>
+        <div className="px-3 pb-3">
+          <Link href="/workflows/new" className={`${primaryButtonClass} w-full gap-1.5`}>
+            <Plus className="size-3.5" />
+            New workflow
+          </Link>
         </div>
 
-        <form className="border-b border-[#ebebeb] px-4 py-4 dark:border-[#262626]" onSubmit={createWorkflow}>
-          <label className="mb-2 block text-xs font-medium text-[#666] dark:text-[#999]">
-            Create workflow
-          </label>
-          <div className="flex gap-2">
-            <input
-              className="h-9 min-w-0 flex-1 rounded-lg border border-[#ebebeb] bg-[#fafafa] px-3 text-sm outline-none focus:border-neutral-400 dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]"
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              placeholder="Weekly report"
-              aria-label="New workflow name"
-            />
-            <button type="submit" className={primaryButtonClass} disabled={!nameDraft.trim()}>
-              Add
-            </button>
-          </div>
-        </form>
-
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <p className="mb-2 px-2 text-xs font-medium tracking-wide text-[#999] uppercase dark:text-[#666]">
-            Your workflows
-          </p>
+        <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {workflows.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-[#ebebeb] px-4 py-6 text-center text-sm text-[#666] dark:border-[#262626] dark:text-[#999]">
-              No workflows yet. Create one above or use New with AI.
+            <p className="px-2 py-6 text-sm text-muted-foreground">
+              Nothing here yet. New workflow starts from a description.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1.5">
+            <ul className="flex flex-col">
               {workflows.map((workflow) => {
                 const active = selected?.id === workflow.id;
                 return (
-                  <li key={workflow.id} className="group flex items-center gap-1.5">
+                  <li key={workflow.id} className="group flex items-center">
                     <Link
                       href={`/workflows/${workflow.id}`}
-                      className={`min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-sm transition ${
+                      className={cn(
+                        "min-w-0 flex-1 border-l-2 px-3 py-2.5 transition-colors",
                         active
-                          ? "bg-black font-medium text-neutral-50 shadow-sm dark:bg-[#ededed] dark:text-black"
-                          : "text-black hover:bg-[#f5f5f5] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
-                      }`}
+                          ? "border-g-blue bg-g-blue/8"
+                          : "border-transparent hover:bg-muted",
+                      )}
                     >
-                      {workflow.name}
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {workflow.name}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {relativeTime(workflow.updatedAt)}
+                      </span>
                     </Link>
                     <button
                       type="button"
-                      className="rounded-lg px-2 py-2 text-xs text-[#999] opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+                      className="mr-1 rounded-md p-2 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => setPendingDelete(workflow)}
+                      aria-label={`Delete ${workflow.name}`}
                     >
-                      Delete
+                      <Trash2 className="size-3.5" />
                     </button>
                   </li>
                 );
@@ -437,12 +426,21 @@ function StudioInner({
       <section className="flex min-w-0 flex-1 flex-col">
         {selected && graph ? (
           <>
-            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ebebeb] bg-white px-5 py-4 dark:border-[#262626] dark:bg-neutral-950">
+            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card/75 px-5 py-3 backdrop-blur-xl">
               <div className="min-w-0">
-                <h1 className="truncate text-lg font-semibold tracking-[-0.3px]">
+                <h1 className="truncate text-base font-semibold tracking-tight">
                   {displayName}
                 </h1>
-                <p className="text-xs text-[#666] dark:text-[#999]">
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      saveState === "saving" &&
+                        "animate-[pulse-live_1.2s_ease-in-out_infinite] bg-warn",
+                      saveState === "error" && "bg-destructive",
+                      saveState === "saved" && "bg-ok",
+                    )}
+                  />
                   {saveState === "saving"
                     ? "Saving…"
                     : saveState === "error"
@@ -453,10 +451,10 @@ function StudioInner({
 
               <div className="flex flex-wrap items-center gap-2">
                 {localVersions.length > 1 ? (
-                  <label className="flex items-center gap-2 text-xs text-[#666] dark:text-[#999]">
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
                     History
                     <select
-                      className="h-9 rounded-lg border border-[#ebebeb] bg-[#fafafa] px-3 text-sm text-black dark:border-[#262626] dark:bg-[#141414] dark:text-[#ededed]"
+                      className={`${fieldClass} h-9 w-auto`}
                       defaultValue=""
                       onChange={(event) => {
                         const revision = Number(event.target.value);
@@ -478,84 +476,62 @@ function StudioInner({
                 ) : null}
                 {unconfigured.length > 0 ? (
                   <span
-                    className="text-xs text-amber-700 dark:text-amber-500"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-warn/30 bg-warn/10 px-2.5 py-1 text-xs text-[color:var(--warn)]"
                     title={unconfigured.join(", ")}
                   >
                     {unconfigured.length} step
                     {unconfigured.length === 1 ? "" : "s"} need a tool
                   </span>
                 ) : null}
-                <button
-                  type="button"
-                  className={secondaryButtonClass}
+                <ParticleButton
+                  variant="outline"
+                  size="lg"
+                  className="h-9"
                   disabled={running !== false}
-                  onClick={() => void runNow(true)}
+                  pendingLabel="Testing"
+                  successLabel="Tested"
+                  errorLabel="Failed"
+                  particles={false}
+                  onClick={() => runNow(true)}
                   title="Walk the workflow without calling any tool or sending anything"
                 >
-                  {running === "dry" ? "Testing…" : "Test run"}
-                </button>
-                <button
-                  type="button"
-                  className={primaryButtonClass}
-                  // Only live runs are blocked: a test run calls nothing, and
-                  // seeing how far a half-built workflow gets is its point.
+                  Test run
+                </ParticleButton>
+                <ParticleButton
+                  size="lg"
+                  className="h-9"
                   disabled={running !== false || unconfigured.length > 0}
-                  onClick={() => void runNow(false)}
+                  pendingLabel="Running"
+                  successLabel="Finished"
+                  errorLabel="Failed"
+                  onClick={() => runNow(false)}
                   title={
                     unconfigured.length > 0
                       ? "Every step needs a tool before this can run"
                       : undefined
                   }
                 >
-                  {running === "live" ? "Running…" : "Run now"}
-                </button>
+                  Run now
+                </ParticleButton>
               </div>
             </header>
 
             {error ? (
-              <p className="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              <p className="border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-sm text-destructive">
                 {error}
               </p>
             ) : null}
 
-            {runResult ? (
-              <div
-                className={`border-b px-4 py-2 text-sm ${
-                  runResult.status === "SUCCEEDED"
-                    ? "border-[#ebebeb] text-[#666] dark:border-[#1a1a1a] dark:text-[#999]"
-                    : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="font-medium">
-                    {runResult.dryRun ? "Test run" : "Run"}{" "}
-                    {runResult.status === "SUCCEEDED" ? "succeeded" : "failed"}
-                    {runResult.dryRun ? " — nothing was sent" : ""}
-                  </p>
-                  <button
-                    type="button"
-                    aria-label="Close run result"
-                    className="-mr-1 cursor-pointer rounded px-1 text-base leading-none opacity-70 hover:opacity-100"
-                    onClick={() => setRunResult(null)}
-                  >
-                    &times;
-                  </button>
-                </div>
-                {runResult.error ? <p className="mt-0.5">{runResult.error}</p> : null}
-
-                {/* The result is why the run was started, so it leads rather
-                    than hiding behind a disclosure. */}
-                {runResult.output ? (
-                  <div className="mt-2">
-                    <p className="text-[10px] font-semibold tracking-wide text-[#999] uppercase dark:text-[#666]">
-                      Result
-                    </p>
-                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[#f5f5f5] px-3 py-2 font-sans text-sm text-black dark:bg-[#1a1a1a] dark:text-[#ededed]">
-                      {runResult.output}
-                    </pre>
-                  </div>
+            {runResult?.output || (runResult && runResult.steps.length > 0) ? (
+              <div className="border-b border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+                {runResult.error ? (
+                  <p className="text-destructive">{runResult.error}</p>
                 ) : null}
-
+                {runResult.output ? (
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted px-3 py-2 font-sans text-sm text-foreground">
+                    {runResult.output}
+                  </pre>
+                ) : null}
                 <details className="mt-2">
                   <summary className="cursor-pointer text-xs">
                     {runResult.steps.length} step
@@ -568,7 +544,7 @@ function StudioInner({
                         {step.status.toLowerCase()}
                         {step.error ? ` — ${step.error}` : ""}
                         {step.output ? (
-                          <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[#f5f5f5] px-2 py-1 font-mono text-[11px] dark:bg-[#1a1a1a]">
+                          <pre className="mt-0.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1 font-mono text-[11px]">
                             {step.output}
                           </pre>
                         ) : null}
@@ -580,6 +556,16 @@ function StudioInner({
             ) : null}
 
             <div className="relative min-h-0 flex-1">
+              {islandTasks.length > 0 ? (
+                <div className="pointer-events-none absolute inset-x-0 top-4 z-20 flex justify-center">
+                  <div className="pointer-events-auto">
+                    <StatusIsland
+                      tasks={islandTasks}
+                      onDismiss={() => setRunResult(null)}
+                    />
+                  </div>
+                </div>
+              ) : null}
               <ReactFlowProvider>
                 <ScheduleContext.Provider value={schedule}>
                   <WorkflowCanvas
@@ -594,40 +580,39 @@ function StudioInner({
               </ReactFlowProvider>
               {modifying ? (
                 <div
-                  className="absolute inset-0 z-40 cursor-wait"
+                  className="absolute inset-x-0 bottom-4 z-40 flex justify-center px-4"
                   aria-label="Changing workflow"
-                />
+                >
+                  <div className="w-full max-w-md rounded-2xl border border-border bg-card px-4 py-3 shadow-lg">
+                    <AgentTrace active preset="modify" />
+                  </div>
+                </div>
               ) : null}
             </div>
 
-            <div className="shrink-0 border-t border-[#ebebeb] bg-white px-5 py-4 dark:border-[#262626] dark:bg-neutral-950">
+            <div className="shrink-0 border-t border-border bg-card/70 px-5 py-4 backdrop-blur-xl">
               {modificationQuestions.length > 0 ? (
-                <div className="mb-3 rounded-lg bg-[#f5f5f5] px-3 py-2 dark:bg-[#1a1a1a]">
-                  <p className="mb-1 text-xs font-medium text-black dark:text-[#ededed]">
+                <div className="mx-auto mb-3 max-w-3xl rounded-xl border border-border bg-muted/70 px-3 py-2">
+                  <p className="mb-1 text-xs font-medium text-foreground">
                     I need one detail before changing it:
                   </p>
                   {modificationQuestions.map((question) => (
-                    <p
-                      key={question.id}
-                      className="text-xs text-[#666] dark:text-[#999]"
-                    >
+                    <p key={question.id} className="text-xs text-muted-foreground">
                       {question.question}
-                      {question.suggestion
-                        ? ` (Suggested: ${question.suggestion})`
-                        : ""}
+                      {question.suggestion ? ` (Suggested: ${question.suggestion})` : ""}
                     </p>
                   ))}
                 </div>
               ) : null}
 
               {modificationFeedback ? (
-                <p className="mb-2 text-xs text-[#666] dark:text-[#999]">
+                <p className="mx-auto mb-2 max-w-3xl text-xs text-ok">
                   {modificationFeedback}
                 </p>
               ) : null}
 
               <form
-                className="mx-auto flex max-w-3xl items-center gap-2"
+                className="glass mx-auto flex max-w-3xl items-center gap-2 rounded-2xl p-1.5"
                 onSubmit={modifyWorkflow}
               >
                 <input
@@ -640,7 +625,7 @@ function StudioInner({
                       ? "Answer here…"
                       : "Describe a change, e.g. “add a step that summarizes the emails”…"
                   }
-                  className="h-10 min-w-0 flex-1 rounded-xl border border-[#ebebeb] bg-transparent px-3 text-sm text-black outline-none placeholder:text-[#999] focus:border-[#999] disabled:opacity-50 dark:border-[#1a1a1a] dark:text-[#ededed]"
+                  className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
                 />
                 <button
                   type="submit"
@@ -653,40 +638,45 @@ function StudioInner({
             </div>
           </>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 px-10 text-center">
-            <div className="max-w-md rounded-2xl border border-[#ebebeb] bg-white p-8 shadow-sm dark:border-[#262626] dark:bg-neutral-950">
-              <h1 className="text-xl font-semibold tracking-[-0.4px]">
-                Select a workflow
+          <div className="studio-wash relative flex flex-1 flex-col items-center justify-center px-10">
+            <div className="relative max-w-md">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                Open a workflow
               </h1>
-              <p className="mt-2 text-sm text-[#666] dark:text-[#999]">
-                Create one in the sidebar, then right-click the canvas to add a
-                connected tool. Drag between handles to wire steps together.
+              <p className="mt-2 text-sm leading-relaxed text-foreground/80">
+                Pick one from the list, or describe a new one. On the canvas,
+                right-click to add a tool and drag between the handles to connect
+                steps.
               </p>
-              <Link href="/workflows/new" className={`${primaryButtonClass} mt-5 inline-flex`}>
-                Build with AI
+              <Link
+                href="/workflows/new"
+                className={`${primaryButtonClass} mt-5 inline-flex gap-1.5`}
+              >
+                <Plus className="size-3.5" />
+                New workflow
               </Link>
             </div>
-            {error ? <p className="text-sm text-red-600">{error}</p> : null}
+            {error ? <p className="relative mt-4 text-sm text-destructive">{error}</p> : null}
           </div>
         )}
       </section>
 
       {pendingDelete ? (
         <div
-          className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 px-4 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-workflow-title"
         >
-          <div className="w-full max-w-sm rounded-2xl border border-[#ebebeb] bg-white p-5 dark:border-[#1a1a1a] dark:bg-neutral-950">
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
             <h2 id="delete-workflow-title" className="text-base font-semibold">
               Delete {pendingDelete.name}?
             </h2>
-            <p className="mt-2 text-sm text-[#666] dark:text-[#999]">
+            <p className="mt-2 text-sm text-muted-foreground">
               This removes the workflow, its version history, and any run logs.
-              It cannot be undone.
+              Hold to confirm — it cannot be undone.
             </p>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 className={secondaryButtonClass}
@@ -694,15 +684,31 @@ function StudioInner({
               >
                 Cancel
               </button>
-              <button type="button" className={primaryButtonClass} onClick={() => void confirmDelete()}>
-                Delete
-              </button>
+              <HoldButton
+                variant="red"
+                className="min-w-40"
+                holdDuration={1100}
+                onHoldComplete={() => void confirmDelete()}
+              >
+                Hold to delete
+              </HoldButton>
             </div>
           </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+function relativeTime(iso: string): string {
+  const delta = Date.now() - new Date(iso).getTime();
+  const minutes = Math.max(0, Math.round(delta / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }
 
 function stableStringify(value: unknown): string {

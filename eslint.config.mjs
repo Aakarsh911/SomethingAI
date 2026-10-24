@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Kokonut registry files: keep vendor source, don't lint their React Compiler style.
+    "src/components/kokonutui/**",
   ]),
 ]);
 

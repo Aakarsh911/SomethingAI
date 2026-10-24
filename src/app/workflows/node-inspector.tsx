@@ -29,6 +29,9 @@ export function NodeInspector({
 }) {
   const catalog = useServerTools(node.data.serverSlug);
   const [filter, setFilter] = useState("");
+  const [picking, setPicking] = useState(() =>
+    isUnconfiguredTool(node.data.toolSlug),
+  );
 
   const toolSlug = isUnconfiguredTool(node.data.toolSlug) ? undefined : node.data.toolSlug;
   const tools = catalog.status === "ready" ? catalog.tools : [];
@@ -44,6 +47,8 @@ export function NodeInspector({
     : tools;
 
   function selectTool(nextToolSlug: string) {
+    setPicking(false);
+    setFilter("");
     if (nextToolSlug === node.data.toolSlug) return;
     // Cleared, not carried over: the new tool may not accept the old arguments.
     onChange(node.id, {
@@ -62,63 +67,83 @@ export function NodeInspector({
       onClose={onClose}
     >
       <section>
-        <p className={labelClass}>Tool</p>
-        <input
-          className={`${fieldClass} mt-1`}
-          placeholder={catalog.status === "loading" ? "Loading tools..." : "Search tools"}
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
+        <div className="flex items-center justify-between gap-2">
+          <p className={labelClass}>Tool</p>
+          {toolSlug ? (
+            <button
+              type="button"
+              className="cursor-pointer text-xs font-medium text-g-blue hover:underline"
+              onClick={() => {
+                setPicking((open) => !open);
+                setFilter("");
+              }}
+            >
+              {picking ? "Cancel" : "Change"}
+            </button>
+          ) : null}
+        </div>
 
-        {catalog.status === "error" ? (
-          <p className={`mt-1 ${errorClass}`}>{catalog.error}</p>
-        ) : null}
+        {picking ? (
+          <>
+            <input
+              className={`${fieldClass} mt-1`}
+              placeholder={catalog.status === "loading" ? "Loading tools..." : "Search tools"}
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            />
 
-        {catalog.status === "ready" && tools.length === 0 ? (
-          <p className={`mt-1 ${hintClass}`}>
-            No tools available for {serverName}. Check the connection under
-            Integrations.
-          </p>
-        ) : null}
+            {catalog.status === "error" ? (
+              <p className={`mt-1 ${errorClass}`}>{catalog.error}</p>
+            ) : null}
 
-        {tools.length > 0 ? (
-          <ul className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-[#ebebeb] dark:border-[#1a1a1a]">
-            {matches.length === 0 ? (
-              <li className={`px-2 py-2 ${hintClass}`}>Nothing matches that.</li>
-            ) : (
-              matches.map((tool) => (
-                <li key={tool.toolSlug}>
-                  <button
-                    type="button"
-                    className={`flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] ${
-                      tool.toolSlug === toolSlug ? "bg-[#f2f2f2] dark:bg-[#1a1a1a]" : ""
-                    }`}
-                    onClick={() => selectTool(tool.toolSlug)}
-                  >
-                    <span className="font-mono text-[11px] text-black dark:text-[#ededed]">
-                      {tool.toolSlug}
-                    </span>
-                    {tool.description ? (
-                      <span className={hintClass}>{tool.description.slice(0, 160)}</span>
-                    ) : null}
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
+            {catalog.status === "ready" && tools.length === 0 ? (
+              <p className={`mt-1 ${hintClass}`}>
+                No tools available for {serverName}. Check the connection under
+                Integrations.
+              </p>
+            ) : null}
+
+            {tools.length > 0 ? (
+              <ul className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border bg-background">
+                {matches.length === 0 ? (
+                  <li className={`px-3 py-2 ${hintClass}`}>Nothing matches that.</li>
+                ) : (
+                  matches.map((tool) => (
+                    <li key={tool.toolSlug}>
+                      <button
+                        type="button"
+                        className={`flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition hover:bg-muted ${
+                          tool.toolSlug === toolSlug ? "bg-g-blue/10" : ""
+                        }`}
+                        onClick={() => selectTool(tool.toolSlug)}
+                      >
+                        <span className="font-mono text-[11px] text-foreground">
+                          {tool.toolSlug}
+                        </span>
+                        {tool.description ? (
+                          <span className={`${hintClass} line-clamp-1`}>
+                            {tool.description}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+            ) : null}
+          </>
+        ) : selected?.description ? (
+          <p className={`mt-1 ${hintClass} line-clamp-2`}>{selected.description}</p>
         ) : null}
       </section>
 
       {!toolSlug ? (
         <p className={`mt-4 ${hintClass}`}>Pick a tool to see the arguments it takes.</p>
       ) : (
-        <section className="mt-4 border-t border-[#ebebeb] pt-3 dark:border-[#1a1a1a]">
+        <section className="mt-4 border-t border-border pt-3">
           <p className={labelClass}>Arguments</p>
           {selected ? (
             <>
-              {selected.description ? (
-                <p className={`mt-1 ${hintClass}`}>{selected.description}</p>
-              ) : null}
               <ArgumentForm
                 key={toolSlug}
                 schema={selected.schema}
@@ -195,21 +220,21 @@ function ArgumentForm({
               <label className={`${labelClass} font-mono`} htmlFor={fieldId}>
                 {parameter.name}
                 {parameter.required ? (
-                  <span className="ml-0.5 text-red-600 dark:text-red-400">*</span>
+                  <span className="ml-0.5 text-destructive">*</span>
                 ) : null}
               </label>
               <button
                 type="button"
-                title="Append a reference to the previous step's output"
-                className="cursor-pointer text-[10px] text-[#666] hover:text-black dark:text-[#999] dark:hover:text-[#ededed]"
+                title="Insert the previous step's output"
+                className="cursor-pointer text-[11px] text-g-blue hover:underline"
                 onClick={() => commit(parameter, `${draft}${PREVIOUS_OUTPUT}`)}
               >
-                + previous output
+                Previous step
               </button>
             </div>
 
             {parameter.description ? (
-              <p className={`mt-0.5 ${hintClass}`}>{parameter.description.slice(0, 200)}</p>
+              <p className={`mt-0.5 ${hintClass} line-clamp-2`}>{parameter.description}</p>
             ) : null}
 
             <div className="mt-1">
@@ -251,18 +276,18 @@ function ArgumentForm({
       })}
 
       {extras.length > 0 ? (
-        <div className="border-t border-[#ebebeb] pt-2 dark:border-[#1a1a1a]">
+        <div className="border-t border-border pt-2">
           <p className={labelClass}>Not accepted by this tool</p>
           <p className={`mt-0.5 ${hintClass}`}>Saved on the node, but dropped when it runs.</p>
           <ul className="mt-1 flex flex-col gap-1">
             {extras.map((key) => (
               <li key={key} className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-[11px] text-[#666] dark:text-[#999]">
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
                   {key}
                 </span>
                 <button
                   type="button"
-                  className="cursor-pointer text-[10px] text-red-600 hover:underline dark:text-red-400"
+                  className="cursor-pointer text-[10px] text-destructive hover:underline"
                   onClick={() => removeExtra(key)}
                 >
                   remove
@@ -272,12 +297,6 @@ function ArgumentForm({
           </ul>
         </div>
       ) : null}
-
-      <p className={hintClass}>
-        Reference an earlier step with{" "}
-        <code className="font-mono">{PREVIOUS_OUTPUT}</code> or{" "}
-        <code className="font-mono">{"{{steps.<id>.output}}"}</code>.
-      </p>
     </div>
   );
 }

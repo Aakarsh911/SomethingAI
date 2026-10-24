@@ -1,4 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
+import FlowField from "@/components/kokonutui/flow-field";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { WorkflowChat } from "./workflow-chat";
@@ -13,24 +16,34 @@ export default async function NewWorkflowPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
 
-  // Only the count is needed, and the tool list costs a round trip to
-  // Composio, so that is left to the generate route.
   const connections = await prisma.userMcpConnection.count({
     where: { userId: user.id, status: "CONNECTED" },
   });
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-6 py-12 min-[600px]:px-[60px]">
-      <div className="flex flex-col gap-10">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-medium text-black dark:text-[#ededed]">
-            New workflow
-          </h1>
-          <p className="text-sm text-[#666] dark:text-[#999]">
-            Describe an automation in your own words. You will see the steps
-            before anything is saved.
-          </p>
-        </div>
+    <div className="relative h-full overflow-hidden bg-canvas">
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-24 left-1/2 h-[28rem] w-[44rem] -translate-x-1/2 rounded-full bg-g-blue/20 blur-3xl" />
+        <div className="absolute top-1/3 -left-16 h-72 w-72 rounded-full bg-g-green/15 blur-3xl" />
+        <div className="absolute right-0 bottom-10 h-80 w-80 rounded-full bg-g-yellow/25 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 h-64 w-64 rounded-full bg-g-red/10 blur-3xl" />
+      </div>
+      <FlowField
+        className="text-g-blue/35 dark:text-g-blue/30"
+        density={0.7}
+        speed={0.7}
+      />
+
+      <div className="relative z-10 flex h-full flex-col">
+        <header className="shrink-0 px-6 pt-6 min-[600px]:px-10">
+          <Link
+            href="/workflows"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted"
+          >
+            <ArrowLeft className="size-3.5" />
+            Workflows
+          </Link>
+        </header>
 
         <WorkflowChat hasConnections={connections > 0} />
       </div>

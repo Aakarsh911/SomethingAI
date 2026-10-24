@@ -195,7 +195,7 @@ export function ScheduleInspector({
       </fieldset>
 
       {mode === "SCHEDULE" ? (
-        <section className="mt-4 flex flex-col gap-3 border-t border-[#ebebeb] pt-3 dark:border-[#1a1a1a]">
+        <section className="mt-4 flex flex-col gap-3 border-t border-border pt-3">
           <div>
             <label className={labelClass} htmlFor="schedule-repeat">
               Repeat
@@ -234,8 +234,8 @@ export function ScheduleInspector({
                       aria-pressed={active}
                       className={`h-7 w-10 cursor-pointer rounded-full border text-xs ${
                         active
-                          ? "border-transparent bg-black text-neutral-50 dark:bg-[#ededed] dark:text-black"
-                          : "border-[#ebebeb] text-black hover:bg-[#f2f2f2] dark:border-[#1a1a1a] dark:text-[#ededed] dark:hover:bg-[#1a1a1a]"
+                          ? "border-transparent bg-primary text-primary-foreground"
+                          : "border-border text-foreground hover:bg-accent"
                       }`}
                       onClick={() => toggleDay(day)}
                     >
@@ -309,14 +309,14 @@ export function ScheduleInspector({
           )}
 
           {/* Read back in words to confirm what will be saved. */}
-          <p className="rounded-lg bg-[#f5f5f5] px-2 py-1.5 text-xs text-black dark:bg-[#1a1a1a] dark:text-[#ededed]">
+          <p className="rounded-lg bg-muted px-2 py-1.5 text-xs text-foreground">
             {noDays ? "Pick at least one day." : describeSchedule(cronText, zone)}
           </p>
         </section>
       ) : null}
 
       {mode === "ONCE" ? (
-        <section className="mt-4 flex flex-col gap-3 border-t border-[#ebebeb] pt-3 dark:border-[#1a1a1a]">
+        <section className="mt-4 flex flex-col gap-3 border-t border-border pt-3">
           <div>
             <label className={labelClass} htmlFor="schedule-run-at">
               Date and time
@@ -340,7 +340,7 @@ export function ScheduleInspector({
       ) : null}
 
       {mode !== "MANUAL" ? (
-        <label className="mt-4 flex cursor-pointer items-start gap-2 border-t border-[#ebebeb] pt-3 text-sm dark:border-[#1a1a1a]">
+        <label className="mt-4 flex cursor-pointer items-start gap-2 border-t border-border pt-3 text-sm">
           <input
             type="checkbox"
             className="mt-0.5"

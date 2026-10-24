@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import { X } from "lucide-react";
 
-/** The side panel that opens over the canvas when a node is selected. */
+/** The side sheet that opens over the canvas when a node is selected. */
 export function InspectorPanel({
   eyebrow,
   title,
@@ -20,15 +21,15 @@ export function InspectorPanel({
   children: ReactNode;
 }) {
   return (
-    <aside className="absolute top-0 right-0 z-30 flex h-full w-80 flex-col border-l border-[#ebebeb] bg-white dark:border-[#1a1a1a] dark:bg-neutral-950">
-      <header className="flex shrink-0 items-start justify-between gap-2 border-b border-[#ebebeb] px-3 py-2 dark:border-[#1a1a1a]">
+    <aside className="absolute top-4 right-4 bottom-4 z-30 flex w-[22rem] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
+      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3.5">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold tracking-wide text-[#666] uppercase dark:text-[#999]">
+          <p className="text-xs font-medium text-muted-foreground">
             {eyebrow}
           </p>
           <p
-            className={`truncate text-xs text-black dark:text-[#ededed] ${
-              monospaceTitle ? "font-mono" : ""
+            className={`mt-0.5 truncate text-sm font-medium text-foreground ${
+              monospaceTitle ? "font-mono text-xs" : ""
             }`}
           >
             {title}
@@ -37,19 +38,17 @@ export function InspectorPanel({
         <button
           type="button"
           aria-label={closeLabel}
-          className="cursor-pointer rounded px-1 text-sm text-[#666] hover:text-black dark:hover:text-[#ededed]"
+          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
           onClick={onClose}
         >
-          &times;
+          <X className="size-3.5" />
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
 
       {footer ? (
-        <footer className="shrink-0 border-t border-[#ebebeb] px-3 py-2 dark:border-[#1a1a1a]">
-          {footer}
-        </footer>
+        <footer className="shrink-0 border-t border-border px-4 py-3">{footer}</footer>
       ) : null}
     </aside>
   );
