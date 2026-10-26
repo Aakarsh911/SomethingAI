@@ -1,6 +1,6 @@
 "use client";
 
-import dynamic from "next/navigation";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight } from "lucide-react";
@@ -212,8 +212,6 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         ref={threadRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-<<<<<<< HEAD
-<<<<<<< HEAD
         {empty ? (
           <div className="flex flex-col items-center text-center">
             <h1 className="text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
@@ -371,7 +369,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           <Dictaphone
             promptInputRef={promptInputRef}
             shouldReset={shouldResetTranscript}
-            onStopRecording={(stopFn) => { stopRecordingRef.current = stopFn; }}
+            onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
           />
         </div>
       </div>

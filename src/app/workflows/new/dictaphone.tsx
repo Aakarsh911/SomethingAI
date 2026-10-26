@@ -8,7 +8,7 @@ export function Dictaphone({
   shouldReset,
   onStopRecording
 }: {
-  promptInputRef?: React.RefObject<HTMLTextAreaElement>;
+  promptInputRef?: React.RefObject<HTMLTextAreaElement | null>;
   shouldReset?: boolean;
   onStopRecording?: (stopFn: () => void) => void;
 }) {
