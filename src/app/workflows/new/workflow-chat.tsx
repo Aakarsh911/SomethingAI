@@ -360,18 +360,18 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           models={[{ name: "SomethingAI" }]}
           placeholder="Describe what you want to automate…"
           showAttach={false}
+          customControls={
+            <Dictaphone
+              promptInputRef={promptInputRef}
+              shouldReset={shouldResetTranscript}
+              onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
+            />
+          }
           onSubmit={(value, _model, options) => {
             setShouldResetTranscript(true);
             return generate(value, options.signal);
           }}
         />
-        <div className="absolute right-16 bottom-[22px] z-10 pointer-events-auto">
-          <Dictaphone
-            promptInputRef={promptInputRef}
-            shouldReset={shouldResetTranscript}
-            onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
-          />
-        </div>
       </div>
     </div>
   );
