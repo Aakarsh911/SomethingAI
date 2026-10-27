@@ -1,0 +1,46 @@
+{
+  "family": "somethingai-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "executionRoleArn": "arn:aws:iam::635738234685:role/somethingai-ecs-execution",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "REPLACED_BY_DEPLOY_WORKFLOW",
+      "essential": true,
+      "stopTimeout": 120,
+      "environment": [
+        { "name": "OPENAI_STEP_MODEL", "value": "gpt-5.5" },
+        { "name": "WORKER_CONCURRENCY", "value": "4" }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:ssm:us-east-2:635738234685:parameter/somethingai/DATABASE_URL"
+        },
+        {
+          "name": "COMPOSIO_API_KEY",
+          "valueFrom": "arn:aws:ssm:us-east-2:635738234685:parameter/somethingai/COMPOSIO_API_KEY"
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "arn:aws:ssm:us-east-2:635738234685:parameter/somethingai/OPENAI_API_KEY"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/somethingai-worker",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "worker"
+        }
+      }
+    }
+  ]
+}
