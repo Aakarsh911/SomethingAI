@@ -24,7 +24,11 @@ export const metadata: Metadata = {
     "Describe an automation in plain English. SomethingAI compiles it into an editable workflow across Gmail, GitHub, Slack and 800+ tools.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <ClerkProvider appearance={{ theme: shadcn }}>
       <html

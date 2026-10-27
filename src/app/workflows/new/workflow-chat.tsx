@@ -1,12 +1,17 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
+import { ArrowUpRight } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+
+const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
+  ssr: false
+});
 
 type DraftStep = {
   kind: "tool" | "llm";
@@ -73,6 +78,9 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [saving, setSaving] = useState(false);
   const [traceRun, setTraceRun] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
+  const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const stopRecordingRef = useRef<(() => void) | null>(null);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -141,6 +149,11 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
     const trimmed = text.trim();
     if (!trimmed || generating) return;
     setTraceRun((current) => current + 1);
+    setShouldResetTranscript(true);
+    // Stop Dictaphone recording if active
+    if (stopRecordingRef.current) {
+      stopRecordingRef.current();
+    }
     return send(
       [...messages, { role: "user", content: trimmed }],
       [{ role: "user", text: trimmed }],
@@ -337,17 +350,29 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         </div>
       </div>
 
-      <AI_Prompt
-        className="mx-auto mb-4 w-full max-w-2xl shrink-0 py-2"
-        commands={[]}
-        defaultModel="SomethingAI"
-        disabled={!hasConnections}
-        headerText=""
-        models={[{ name: "SomethingAI" }]}
-        placeholder="Describe what you want to automate…"
-        showAttach={false}
-        onSubmit={(value, _model, options) => generate(value, options.signal)}
-      />
+      <div className="relative mx-auto mb-4 w-full shrink-0">
+        <AI_Prompt
+          className="py-2 mx-auto"
+          commands={[]}
+          defaultModel="SomethingAI"
+          disabled={!hasConnections}
+          headerText=""
+          models={[{ name: "SomethingAI" }]}
+          placeholder="Describe what you want to automate…"
+          showAttach={false}
+          customControls={
+            <Dictaphone
+              promptInputRef={promptInputRef}
+              shouldReset={shouldResetTranscript}
+              onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
+            />
+          }
+          onSubmit={(value, _model, options) => {
+            setShouldResetTranscript(true);
+            return generate(value, options.signal);
+          }}
+        />
+      </div>
     </div>
   );
 }

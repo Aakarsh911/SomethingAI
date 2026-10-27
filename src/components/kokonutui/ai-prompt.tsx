@@ -101,6 +101,8 @@ interface AIPromptProps {
   disabled?: boolean;
   /** Hide the paperclip control when the host does not take files. */
   showAttach?: boolean;
+  /** Custom controls to show before the send button. */
+  customControls?: ReactNode;
 }
 
 const DEFAULT_COMMANDS: PromptCommand[] = [
@@ -741,6 +743,7 @@ export default function AI_Prompt({
   className,
   disabled = false,
   showAttach = true,
+  customControls,
 }: AIPromptProps) {
   const [value, setValue] = useState("");
   const [command, setCommand] = useState<PromptCommand | null>(null);
@@ -1105,6 +1108,7 @@ export default function AI_Prompt({
               />
             )}
             <div className="flex-1" />
+            {customControls}
             <SendButton
               canSend={canSend}
               onSend={submit}
