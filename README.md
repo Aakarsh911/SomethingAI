@@ -39,7 +39,7 @@ Temporal-backed durable waits, live run highlighting, and approval gates are not
 | Secrets | Encrypted columns today; Infisical/Doppler/KMS later | OAuth tokens never stored in the clear |
 | Real-time execution | Redis pub/sub + WebSockets (or Supabase Realtime) | Node-by-node canvas updates |
 | Observability | OpenTelemetry + Axiom or Sentry | Native Temporal traces |
-| Deployment | Vercel (app), worker on Fly.io (`worker/Dockerfile`), MCP servers on Fly.io / Cloud Run | |
+| Deployment | Vercel (app), Neon (Postgres), worker on AWS ECS Fargate (`worker/Dockerfile`) | GitHub Actions; see [`docs/deployment.md`](docs/deployment.md) |
 
 ## Key architectural decision
 
@@ -184,11 +184,9 @@ environment variables:
 - `DATABASE_URL` = pooled string (host contains `-pooler`) + `?sslmode=require`
 - `DIRECT_URL` = direct string + `?sslmode=require`
 
-Set the build command so schema changes ship with the code that needs them:
-
-```bash
-prisma generate && prisma migrate deploy && next build
-```
+Migrations are applied by the deploy pipeline before the new app or worker
+starts, not in the Vercel build command — see
+[`docs/deployment.md`](docs/deployment.md).
 
 ## MCP integrations
 

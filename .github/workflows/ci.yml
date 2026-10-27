@@ -1,0 +1,50 @@
+# Checks every pull request. On main, deploy.yml calls this before shipping.
+# Needs no secrets: nothing here talks to a real database or third party.
+name: CI
+
+on:
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A newer push to a PR makes the older check moot; on main it is a deploy.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  web:
+    name: Web (lint, typecheck, build)
+    runs-on: ubuntu-latest
+    env:
+      # `next build` imports src/lib/db.ts, which refuses to load without a URL.
+      # The build never connects, so a placeholder is enough.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Explicit because newer npm versions skip install scripts, so
+      # `postinstall` cannot be relied on to generate the client.
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+
+  worker:
+    name: Worker (vet, test, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: worker/go.mod
+          cache-dependency-path: worker/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./cmd/worker
