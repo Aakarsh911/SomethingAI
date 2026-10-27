@@ -1,13 +1,13 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
+import { ArrowUpRight } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
   ssr: false
@@ -350,9 +350,9 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
         </div>
       </div>
 
-      <div className="relative mx-auto mb-4 w-full max-w-2xl shrink-0">
+      <div className="relative mx-auto mb-4 w-full shrink-0">
         <AI_Prompt
-          className="py-2"
+          className="py-2 mx-auto"
           commands={[]}
           defaultModel="SomethingAI"
           disabled={!hasConnections}
