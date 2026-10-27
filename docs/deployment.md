@@ -125,6 +125,7 @@ name it `read-somethingai-parameters`.
    | `COMPOSIO_API_KEY` | Composio |
    | `OPENAI_API_KEY` | OpenAI |
    | `OPENAI_MODEL` | optional |
+   | `MODULATE_API_KEY` | Modulate, for speech-to-text in the prompt box |
 
    Keep `MCP_TOKEN_ENCRYPTION_KEY` safe: losing or changing it makes every
    stored API key undecryptable.
