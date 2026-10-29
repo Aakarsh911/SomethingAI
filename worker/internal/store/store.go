@@ -85,22 +85,24 @@ type DueWorkflow struct {
 	Timezone *string
 	Graph    string
 	Version  int32
+	// Stale: missed by more than the grace period, so skip it.
+	Stale bool
 }
 
 // EnqueueDue turns every due workflow into a QUEUED run and advances its
 // nextRunAt in one transaction. FOR UPDATE SKIP LOCKED gives each due row to
 // exactly one worker; nextOf computes the following slot (nil clears it). The
 // slot advances whether the run passes or fails, and a ONCE workflow is
-// switched off in the same update.
+// switched off in the same update. Slots due before staleBefore are skipped.
 func (s *Store) EnqueueDue(
 	ctx context.Context,
-	now time.Time,
+	now, staleBefore time.Time,
 	limit int,
 	nextOf func(DueWorkflow) *time.Time,
-) (enqueued int, err error) {
+) (enqueued, skipped int, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() {
 		if err != nil {
@@ -109,24 +111,25 @@ func (s *Store) EnqueueDue(
 	}()
 
 	rows, err := tx.Query(ctx, `
-		SELECT id, "userId", trigger::text, cron, timezone, graph::text, "graphVersion"
+		SELECT id, "userId", trigger::text, cron, timezone, graph::text, "graphVersion",
+			"nextRunAt" < $3::timestamp
 		FROM "Workflow"
 		WHERE "isEnabled" = true AND "nextRunAt" <= $1::timestamp
 		ORDER BY "nextRunAt"
 		LIMIT $2
 		FOR UPDATE SKIP LOCKED`,
-		ts(now), limit,
+		ts(now), limit, ts(staleBefore),
 	)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	due, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (DueWorkflow, error) {
 		var w DueWorkflow
-		err := row.Scan(&w.ID, &w.UserID, &w.Trigger, &w.Cron, &w.Timezone, &w.Graph, &w.Version)
+		err := row.Scan(&w.ID, &w.UserID, &w.Trigger, &w.Cron, &w.Timezone, &w.Graph, &w.Version, &w.Stale)
 		return w, err
 	})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
 	for _, w := range due {
@@ -136,6 +139,21 @@ func (s *Store) EnqueueDue(
 			next = &formatted
 		}
 
+		if w.Stale {
+			// Nothing ran, so lastRunAt stays.
+			if _, err := tx.Exec(ctx, `
+				UPDATE "Workflow"
+				SET "nextRunAt" = $2::timestamp,
+					"isEnabled" = "isEnabled" AND trigger <> 'ONCE'
+				WHERE id = $1`,
+				w.ID, next,
+			); err != nil {
+				return 0, 0, err
+			}
+			skipped++
+			continue
+		}
+
 		if _, err := tx.Exec(ctx, `
 			UPDATE "Workflow"
 			SET "lastRunAt" = $2::timestamp, "nextRunAt" = $3::timestamp,
@@ -143,7 +161,7 @@ func (s *Store) EnqueueDue(
 			WHERE id = $1`,
 			w.ID, ts(now), next,
 		); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 
 		// ONCE or SCHEDULE, so run history can tell a one-off from a repeat.
@@ -157,14 +175,15 @@ func (s *Store) EnqueueDue(
 			VALUES (gen_random_uuid()::text, $1, 'QUEUED', $2::"WorkflowTrigger", $3::jsonb, $4, false, $5::timestamp)`,
 			w.ID, runTrigger, w.Graph, w.Version, ts(now),
 		); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
+		enqueued++
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return len(due), nil
+	return enqueued, skipped, nil
 }
 
 /* -------------------------------------------------------------------- runs */

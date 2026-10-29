@@ -1,9 +1,3 @@
-// Prisma schema. Docs: https://pris.ly/d/prisma-schema
-//
-// The connection URL is NOT declared here — in Prisma 7 the CLI reads it from
-// `datasource.url` in prisma7.config.ts, and the app supplies it at runtime
-// through the driver adapter in src/lib/db.ts.
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -13,9 +7,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// Mirrors Clerk user profiles. Clerk owns auth/passwords/sessions — this
-// table exists only so app data can have a stable FK to a user. Kept in
-// sync via the webhook at src/app/api/webhooks/clerk/route.ts.
 model User {
   id        String   @id @default(cuid())
   clerkId   String   @unique
@@ -39,12 +30,8 @@ enum McpTransport {
 }
 
 enum McpAuthType {
-  // Nothing to authorize; the endpoint is open.
   NONE
-  // The user pastes a key, which we encrypt and store.
   API_KEY
-  // Composio brokers the provider's OAuth flow and holds the tokens. We only
-  // keep the id of the resulting connected account.
   COMPOSIO
 }
 
@@ -55,16 +42,6 @@ enum McpConnectionStatus {
   REVOKED
 }
 
-// An MCP server that can be connected to. Two flavours live in this table:
-//
-//   ownerId == null  ->  curated catalog entry, visible to everyone (e.g. Gmail).
-//                        Created by prisma/seed.ts from src/lib/mcp/catalog.ts.
-//   ownerId != null  ->  a server one user added themselves, visible only to them.
-//
-// `slug` is globally unique rather than unique-per-owner because Postgres treats
-// NULLs as distinct, so `@@unique([ownerId, slug])` would not actually stop two
-// catalog rows from sharing a slug. Custom servers get a random suffix appended
-// at creation time (see slugifyServerName in src/lib/mcp/servers.ts).
 model McpServer {
   id          String  @id @default(cuid())
   slug        String  @unique
@@ -73,57 +50,22 @@ model McpServer {
   iconUrl     String?
   docsUrl     String?
 
-  // Endpoint the MCP client talks to. Null for COMPOSIO servers: Composio
-  // mints a short-lived per-user session URL at call time, so there is no
-  // stable address to record here.
   url       String?
   transport McpTransport @default(HTTP)
   authType  McpAuthType  @default(COMPOSIO)
 
-  // Composio toolkit slug, e.g. "gmail". Set when authType is COMPOSIO.
   composioToolkit String?
 
-  // Composio auth config ("ac_...") backing this toolkit. Created on first
-  // connect and cached here so every later user reuses the same one — a new
-  // auth config per user would fragment Composio's account management.
   composioAuthConfigId String?
 
-  // Which of the toolkit's auth schemes this app connects it with, e.g.
-  // "OAUTH2", "API_KEY", "NO_AUTH".
-  //
-  // Pinned at sync time by pickAuthScheme() in src/lib/mcp/composio-toolkits.ts
-  // rather than re-derived per request, because it decides two things that
-  // must not disagree: the shape of the auth config created upstream, and
-  // whether connecting bounces the browser to a consent screen or asks the
-  // user to type a credential. Re-deriving it after the auth config already
-  // exists would strand connections against a config of the wrong scheme.
   composioAuthScheme String?
 
-  // Whether Composio supplies the OAuth application behind `composioAuthScheme`.
-  //
-  // This is the line between an integration a user can connect on their own
-  // and one that needs somebody to register an OAuth client with the provider
-  // first. Only ~120 of Composio's toolkits are managed, so without this the
-  // UI cannot tell which Connect buttons would fail on click.
   composioManagedAuth Boolean @default(false)
 
-  // Composio's category slugs for this toolkit, e.g. ["crm", "productivity"].
-  //
-  // Denormalised from the toolkit API rather than kept in a join table: the
-  // catalog is ~1500 rows and the only thing categories do is narrow that
-  // list in the UI, which a GIN-indexed array answers on its own.
   categories String[]
 
-  // Rank within the catalog, higher first. Derived from the order Composio
-  // returns when asked to sort by usage.
-  //
-  // Stored because there is no way to recover it at query time: Composio's
-  // ordering is not a property of any field we copy. Without it the catalog
-  // can only be sorted by name, and 1500 integrations alphabetised open on
-  // "1Shot API" rather than Gmail.
   popularity Int @default(0)
 
-  // Lets us retire a catalog entry without deleting rows that reference it.
   isEnabled Boolean @default(true)
 
   ownerId String?
@@ -135,14 +77,10 @@ model McpServer {
   updatedAt DateTime @updatedAt
 
   @@index([ownerId])
-  /// Serves the catalog browser, whose visible set is always enabled rows
-  /// most-used first. Without it that is a sort over the whole table on
-  /// every page load.
   @@index([isEnabled, popularity(sort: Desc)])
   @@index([categories], type: Gin)
 }
 
-// One user's link to one MCP server, including the credentials to call it.
 model UserMcpConnection {
   id       String @id @default(cuid())
   userId   String
@@ -153,19 +91,11 @@ model UserMcpConnection {
 
   status McpConnectionStatus @default(PENDING)
 
-  // API key for an API_KEY server, encrypted at rest with AES-256-GCM
-  // (src/lib/crypto.ts). Never leaves the server: the API serializes
-  // connections through a view type that has no field for it.
   credential String?
 
-  // Composio connected account ("ca_..."). Composio stores the OAuth tokens
-  // and refreshes them, so this app never sees provider credentials.
   externalAccountId String?
 
-  // Human-readable identity of the connected account, e.g. the Google address.
   accountLabel String?
-
-  // Last failure from a token refresh or tool call, surfaced in the UI.
   lastError String?
 
   connectedAt DateTime?
@@ -178,15 +108,6 @@ model UserMcpConnection {
   @@index([userId])
 }
 
-// Short-lived record tying an in-flight authorization redirect back to the
-// user who started it.
-//
-// Composio's callback tells us the outcome and the connected account id, but
-// nothing trustworthy about who the browser belongs to. Carrying an
-// unguessable `state` through the round trip, and reading the user and server
-// from this row instead of the query string, is what stops a forged callback
-// from attaching an attacker's mailbox to someone else's account. Rows are
-// single-use and swept on expiry.
 model McpConnectAttempt {
   id       String @id @default(cuid())
   state    String @unique
@@ -194,8 +115,6 @@ model McpConnectAttempt {
   serverId String
   returnTo String?
 
-  // Composio's connection request id, kept so the callback can confirm the
-  // account it is handed belongs to the request we started.
   externalRequestId String?
 
   expiresAt DateTime
@@ -211,7 +130,6 @@ enum WorkflowTrigger {
   MANUAL
   SCHEDULE
   WEBHOOK
-  /// Fires once at `runAt`, then the worker switches the workflow off.
   ONCE
 }
 
@@ -223,14 +141,6 @@ enum RunStatus {
   CANCELED
 }
 
-/// A user-authored automation: a graph of steps that call MCP tools.
-///
-/// The graph itself is a JSON blob rather than a table of step rows. Node
-/// kinds and their config shapes are still changing weekly, and a relational
-/// layout would mean a migration for every new node type. The tradeoff is
-/// that Postgres cannot enforce anything about the blob's contents — see
-/// `serverSlugs` below for how the one reference we do need to query is kept
-/// reachable.
 model Workflow {
   id     String @id @default(cuid())
   userId String
@@ -239,51 +149,21 @@ model Workflow {
   name        String
   description String?
 
-  /// `{ nodes: [...], edges: [...] }`. Validated in the app layer by the Zod
-  /// schema in src/lib/workflows/graph.ts, never by the database.
   graph Json
 
-  /// Shape version of `graph`, bumped when the blob's structure changes in a
-  /// way older readers cannot handle. Stored per row so a migration can
-  /// rewrite blobs incrementally instead of in one locking pass.
   graphVersion Int @default(1)
 
-  /// Every MCP server slug referenced anywhere in `graph`, flattened on save.
-  ///
-  /// Derived data, and denormalised on purpose: answering "which workflows
-  /// break if this user disconnects Gmail?" by parsing every blob does not
-  /// scale, and a JSON containment query cannot use a plain index. Kept in
-  /// sync by saveWorkflow() — nothing else should write it.
   serverSlugs String[]
 
   trigger   WorkflowTrigger @default(MANUAL)
-  /// Disabled by default: a workflow should not fire on a schedule the moment
-  /// it is first saved, while the user is still editing it.
   isEnabled Boolean         @default(false)
 
-  /// Standard five-field cron expression, interpreted in `timezone` — NOT in
-  /// UTC. Set when trigger is SCHEDULE, null otherwise.
   cron String?
 
-  /// IANA zone the cron is read in, e.g. "Asia/Kolkata". Captured from the
-  /// user's device unless they say otherwise.
-  ///
-  /// Required alongside `cron`, and not redundant with storing `nextRunAt` in
-  /// UTC: "every Thursday at 09:00" is a different UTC instant before and
-  /// after a DST transition, so converting once and discarding the zone makes
-  /// a recurring job drift by an hour twice a year. Zones without DST hide
-  /// the bug entirely, which is why it survives testing.
   timezone String?
 
-  /// When a ONCE workflow fires, in UTC; null for other triggers. Unlike
-  /// `nextRunAt` it is kept after the run, so the studio can still show it.
   runAt DateTime?
 
-  /// When this workflow is next due, in UTC. Derived from `cron` + `timezone`
-  /// (or `runAt`) on save and recomputed after each run.
-  ///
-  /// This is what makes a scheduler affordable: the runner selects on an index
-  /// rather than evaluating every cron expression on every tick.
   nextRunAt DateTime?
   lastRunAt DateTime?
 
@@ -295,20 +175,9 @@ model Workflow {
 
   @@index([userId, updatedAt(sort: Desc)])
   @@index([serverSlugs], type: Gin)
-  /// Serves the scheduler's only hot query: due, enabled workflows.
   @@index([isEnabled, nextRunAt])
 }
 
-/// Immutable snapshot of a workflow graph.
-///
-/// `Workflow.graph` is the working copy the editor writes to. Each successful
-/// save also appends a row here so the user can restore an earlier shape
-/// without us having rewritten history. The blob is JSONB for the same reason
-/// `Workflow.graph` is: node kinds still change, and a relational layout would
-/// mean a migration per new node type.
-///
-/// `revision` is the user-facing version number (1, 2, 3…). `graphVersion` is
-/// the *schema* version of the blob, matching `Workflow.graphVersion`.
 model WorkflowVersion {
   id         String   @id @default(cuid())
   workflowId String
@@ -325,34 +194,22 @@ model WorkflowVersion {
   @@index([workflowId, createdAt(sort: Desc)])
 }
 
-/// One execution of a workflow.
 model WorkflowRun {
   id         String   @id @default(cuid())
   workflowId String
   workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  /// QUEUED rows are the queue: the worker (worker/) claims them with
-  /// FOR UPDATE SKIP LOCKED. The app only ever inserts QUEUED.
   status  RunStatus       @default(QUEUED)
   trigger WorkflowTrigger
 
-  /// Calls no tool or model; each step records what it would have sent.
   dryRun Boolean @default(false)
 
-  /// The graph exactly as it was when this run started.
-  ///
-  /// Without the copy, editing a workflow silently rewrites the history of
-  /// every run that came before the edit, and a failed run can no longer be
-  /// read against the steps that actually produced it.
   graphSnapshot Json
   graphVersion  Int
 
   startedAt  DateTime?
   finishedAt DateTime?
-  /// Failure summary for the run as a whole. Per-step detail lives on
-  /// WorkflowStepRun.error.
   error      String?
-  /// Output of the last step that produced one; written by the worker.
   output     Json?
 
   stepRuns WorkflowStepRun[]
@@ -363,27 +220,17 @@ model WorkflowRun {
   @@index([status])
 }
 
-/// One step within a run.
-///
-/// Relational rather than another blob, because this is the table that gets
-/// filtered and aggregated: failures by tool, latency by server, retry counts.
 model WorkflowStepRun {
   id    String      @id @default(cuid())
   runId String
   run   WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
-  /// Identifies the node inside the run's `graphSnapshot`. Not a foreign key —
-  /// nodes are not rows.
   nodeId String
 
-  /// Copied off the node so step history survives the server being deleted,
-  /// and so "every Gmail call that failed this week" is one indexed query.
   serverSlug String?
   toolSlug   String?
 
   status  RunStatus @default(QUEUED)
-  /// 1 for the first try. Retries append rows rather than overwriting, so the
-  /// full history of a flaky step stays visible.
   attempt Int       @default(1)
 
   input  Json?
