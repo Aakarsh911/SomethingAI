@@ -10,32 +10,9 @@ import {
   Workflow,
 } from "lucide-react";
 import { ReadableAutomation } from "@/components/landing/after-hero";
+import { HowStaircase } from "@/components/landing/how-staircase";
 import { RunNotifications } from "@/components/landing/run-notifications";
 import { WorkflowPreview } from "@/components/landing/workflow-preview";
-
-const STEPS = [
-  {
-    n: "01",
-    title: "Describe it",
-    lead: "A sentence is enough.",
-    body: "Write what you want. If something is ambiguous — which inbox, what time — it asks instead of guessing.",
-    sample: "Every Thursday, draft a summary of unread mail.",
-  },
-  {
-    n: "02",
-    title: "Review the graph",
-    lead: "Words become steps you can inspect.",
-    body: "A trigger, tool calls and model steps you can rewire, edit, or change by asking. Nothing is hidden behind a prompt.",
-    sample: "gmail.fetch_emails → model.summarize",
-  },
-  {
-    n: "03",
-    title: "Schedule and run",
-    lead: "Test first. Then switch it on.",
-    body: "Walk the whole workflow without calling a tool. When it looks right, put it on a schedule. Every run is logged.",
-    sample: "Test run · Nothing was sent",
-  },
-];
 
 const TOOLS = [
   { name: "Gmail", category: "Mail", tint: "bg-[#EA4335]", Icon: Mail },
@@ -63,31 +40,7 @@ export function ProductSections() {
         </div>
       </section>
 
-      <section id="how" className="mx-auto mt-28 max-w-6xl scroll-mt-24 px-6">
-        <p className="text-sm font-medium text-brand">How it works</p>
-        <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
-          From a sentence to a running workflow.
-        </h2>
-
-        <ol className="mt-14 divide-y divide-border border-y border-border">
-          {STEPS.map((step) => (
-            <li
-              key={step.n}
-              className="grid gap-3 py-10 sm:grid-cols-[5.5rem_minmax(0,1fr)] lg:grid-cols-[5.5rem_minmax(0,16rem)_minmax(0,1fr)] lg:gap-10"
-            >
-              <span className="font-mono text-sm text-brand">{step.n}</span>
-              <div>
-                <h3 className="text-xl font-semibold tracking-tight">{step.title}</h3>
-                <p className="mt-1 text-sm text-foreground/80">{step.lead}</p>
-              </div>
-              <div className="sm:col-start-2 lg:col-start-3">
-                <p className="text-sm leading-relaxed text-muted-foreground">{step.body}</p>
-                <p className="mt-4 font-mono text-[12px] text-subtle">{step.sample}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <HowStaircase />
 
       <ReadableAutomation />
 

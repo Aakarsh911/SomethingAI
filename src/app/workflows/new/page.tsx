@@ -32,6 +32,7 @@ export default async function NewWorkflowPage() {
         className="text-g-blue/35 dark:text-g-blue/30"
         density={0.7}
         speed={0.7}
+        interactive={false}
       />
 
       <div className="relative z-10 flex h-full flex-col">

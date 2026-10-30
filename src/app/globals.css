@@ -275,3 +275,640 @@
 .studio-wash .react-flow {
   --xy-background-color: transparent;
 }
+
+.stf-section {
+  --stf-ink: color-mix(in srgb, var(--stf-c) 74%, var(--foreground));
+  --stf-paper: #f3eee4;
+  --stf-paper-edge: #d4cbbd;
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  background-color: color-mix(in srgb, var(--stf-c) 16%, var(--canvas));
+  transition: background-color 0.55s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.stf-section::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 72% 62% at 16% 40%,
+      color-mix(in srgb, var(--stf-c) 24%, transparent),
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 48% 42% at 92% 8%,
+      color-mix(in srgb, var(--stf-c) 12%, transparent),
+      transparent 60%
+    );
+  transition: opacity 0.55s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.dark .stf-section {
+  --stf-ink: var(--stf-c);
+  --stf-paper: color-mix(in srgb, #c9b79a 18%, var(--background));
+  --stf-paper-edge: color-mix(in srgb, #c9b79a 32%, var(--background));
+  background-color: color-mix(in srgb, var(--stf-c) 12%, var(--background));
+}
+
+.dark .stf-section::before {
+  background:
+    radial-gradient(
+      ellipse 72% 62% at 16% 40%,
+      color-mix(in srgb, var(--stf-c) 16%, transparent),
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 48% 42% at 92% 8%,
+      color-mix(in srgb, var(--stf-c) 8%, transparent),
+      transparent 60%
+    );
+}
+
+.stf-kicker {
+  color: var(--stf-ink);
+  transition: color 0.45s;
+}
+
+.stf-stage {
+  position: relative;
+  height: 520px;
+  overflow: hidden;
+}
+
+.stf-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.stf-sg {
+  opacity: 0;
+  transform: translateY(40px);
+  transition:
+    opacity 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.stf-sg.in {
+  opacity: 1;
+  transform: none;
+}
+
+.stf-sg.in.dim {
+  opacity: 1;
+}
+
+.stf-sg.in.on {
+  transform: none;
+}
+
+.stf-tr {
+  fill: var(--stf-paper);
+  stroke: var(--stf-paper-edge);
+  stroke-width: 0.7;
+  transition: fill 0.45s, stroke 0.45s;
+}
+
+.stf-fr {
+  fill: color-mix(in srgb, var(--stf-paper) 42%, transparent);
+  stroke: color-mix(in srgb, var(--stf-paper-edge) 55%, transparent);
+  stroke-width: 0.55;
+  transition: fill 0.45s, stroke 0.45s;
+}
+
+.stf-sd {
+  fill: color-mix(in srgb, var(--stf-paper-edge) 80%, var(--stf-paper));
+  transition: fill 0.45s;
+}
+
+.stf-shd {
+  fill: var(--foreground);
+  fill-opacity: 0.12;
+}
+
+.stf-nz {
+  stroke: color-mix(in srgb, var(--foreground) 28%, var(--stf-paper-edge));
+  stroke-width: 1.75;
+  stroke-linecap: square;
+  transition: stroke 0.45s;
+}
+
+.stf-hl {
+  stroke: color-mix(in srgb, var(--foreground) 24%, transparent);
+  stroke-width: 1;
+  stroke-linecap: square;
+}
+
+.stf-pool {
+  fill: var(--stf-c);
+  fill-opacity: 0.2;
+  opacity: 0;
+  transition: opacity 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.stf-sg.on .stf-tr {
+  fill: color-mix(in srgb, var(--stf-c) 30%, var(--canvas));
+  stroke: color-mix(in srgb, var(--stf-c) 42%, var(--border));
+}
+
+.stf-sg.on .stf-fr {
+  fill: color-mix(in srgb, var(--stf-c) 20%, var(--canvas));
+}
+
+.stf-sg.on .stf-sd {
+  fill: color-mix(in srgb, var(--stf-c) 28%, var(--stf-paper-edge));
+}
+
+.stf-sg.on .stf-nz {
+  stroke: var(--stf-ink);
+  stroke-width: 2;
+}
+
+.stf-sg.on .stf-pool {
+  opacity: 1;
+}
+
+.stf-rail {
+  opacity: 0;
+  transition: opacity 0.8s;
+}
+
+.stf-rail.in {
+  opacity: 1;
+}
+
+.stf-hand {
+  fill: none;
+  stroke: color-mix(in srgb, var(--foreground) 55%, var(--muted-foreground));
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stf-bal {
+  stroke: color-mix(in srgb, var(--foreground) 40%, transparent);
+  stroke-width: 1.2;
+}
+
+.stf-lab {
+  position: absolute;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px 14px 12px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(40px);
+  background: transparent;
+  transition:
+    opacity 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 0.45s;
+}
+
+.stf-lab.in {
+  opacity: 1;
+  transform: none;
+}
+
+.stf-lab.in.dim {
+  opacity: 1;
+}
+
+.stf-lab.in.on {
+  transform: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--stf-c) 14%, transparent),
+    transparent 55%
+  );
+}
+
+.stf-lab:hover {
+  opacity: 1;
+}
+
+.stf-tt {
+  display: block;
+  position: relative;
+  z-index: 1;
+  max-width: 11rem;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  color: var(--foreground);
+  transition: color 0.45s;
+}
+
+.stf-lab.on .stf-tt {
+  color: var(--stf-ink);
+}
+
+.stf-art {
+  position: relative;
+  z-index: 0;
+  flex: none;
+  width: 68px;
+  height: 68px;
+  margin-top: 12px;
+  pointer-events: none;
+}
+
+.stf-art-panel {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--stf-c) 78%, var(--stf-paper));
+  opacity: 0;
+  transform: scale(0.78) translateY(16px);
+  transform-origin: 50% 50%;
+}
+
+.dark .stf-art-panel {
+  background: color-mix(in srgb, var(--stf-c) 42%, var(--background));
+}
+
+.stf-lab.on .stf-art-panel {
+  animation: stf-art-pop 0.55s cubic-bezier(0.22, 1.28, 0.36, 1) both;
+}
+
+.stf-art-svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.stf-p {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  transform: scale(0.7) translateY(10px);
+}
+
+.stf-lab.on .stf-p {
+  animation: stf-art-pop 0.5s cubic-bezier(0.22, 1.28, 0.36, 1) both;
+}
+
+.stf-lab.on .stf-p:nth-child(1) {
+  animation-delay: 0.06s;
+}
+
+.stf-lab.on .stf-p:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.stf-lab.on .stf-p:nth-child(3) {
+  animation-delay: 0.18s;
+}
+
+.stf-lab.on .stf-p:nth-child(4) {
+  animation-delay: 0.24s;
+}
+
+.stf-lab.on .stf-p:nth-child(5) {
+  animation-delay: 0.3s;
+}
+
+.stf-lab.on .stf-p:nth-child(6) {
+  animation-delay: 0.36s;
+}
+
+.stf-lab.on .stf-p:nth-child(7) {
+  animation-delay: 0.42s;
+}
+
+.stf-art-soft {
+  fill: color-mix(in srgb, white 42%, var(--stf-c));
+}
+
+.stf-art-mid {
+  fill: color-mix(in srgb, white 22%, var(--stf-c));
+}
+
+.stf-art-hard {
+  fill: var(--stf-ink);
+}
+
+.stf-art-lite {
+  fill: color-mix(in srgb, white 88%, var(--stf-c));
+}
+
+.stf-art-ink {
+  fill: color-mix(in srgb, var(--foreground) 55%, var(--stf-ink));
+}
+
+.stf-art-stroke {
+  fill: none;
+  stroke: color-mix(in srgb, white 70%, var(--stf-c));
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.stf-art-ring {
+  fill: none;
+  stroke: color-mix(in srgb, white 55%, var(--stf-c));
+  stroke-width: 6;
+}
+
+.stf-art-check {
+  fill: none;
+  stroke: color-mix(in srgb, white 92%, var(--stf-c));
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stf-big {
+  position: absolute;
+  right: 2px;
+  bottom: -10px;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-size: 80px;
+  font-weight: 600;
+  line-height: 1;
+  color: color-mix(in srgb, var(--foreground) 16%, transparent);
+  pointer-events: none;
+  transition: color 0.45s;
+}
+
+.stf-lab.on .stf-big {
+  color: color-mix(in srgb, white 42%, transparent);
+}
+
+.stf-lab.tight {
+  padding: 12px 12px 8px;
+}
+
+.stf-lab.tight .stf-tt {
+  min-height: 2.4em;
+  font-size: 15px;
+}
+
+.stf-lab.tight .stf-art {
+  width: 52px;
+  height: 52px;
+  margin-top: 8px;
+}
+
+.stf-lab.tight .stf-art-panel {
+  border-radius: 12px;
+}
+
+.stf-card {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  width: min(46%, 21rem);
+  padding: 4px 0 0;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 0.45s cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.stf-card.in {
+  opacity: 1;
+  transform: none;
+}
+
+.stf-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--stf-ink);
+}
+
+.stf-title {
+  margin: 6px 0 4px;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.stf-desc {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.stf-sample {
+  margin: 10px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+.stf-bars {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.stf-bar {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.stf-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--stf-c);
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stf-guy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  width: 30px;
+  height: 46px;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 15px 46px;
+  will-change: transform;
+}
+
+.stf-guy .s {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.stf-guy .hd {
+  fill: var(--card);
+  stroke: var(--foreground);
+  stroke-width: 2.2;
+}
+
+.stf-guy .ey {
+  fill: var(--foreground);
+  transform-origin: 15px 8px;
+  animation: stf-blink 3.4s infinite;
+}
+
+.stf-guy .sc {
+  fill: none;
+  stroke: var(--g-red);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform-origin: 15px 13px;
+  animation: stf-flut 0.7s infinite alternate ease-in-out;
+}
+
+.stf-guy .l1,
+.stf-guy .l2,
+.stf-guy .a1 {
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stf-guy .l1 {
+  transform-origin: 15px 28px;
+}
+
+.stf-guy .l2 {
+  transform-origin: 15px 28px;
+}
+
+.stf-guy .a1 {
+  transform-origin: 15px 17px;
+}
+
+.stf-guy .body {
+  animation: stf-bob 1.6s infinite ease-in-out;
+}
+
+.stf-guy.air .l1 {
+  transform: rotate(-22deg);
+}
+
+.stf-guy.air .l2 {
+  transform: rotate(12deg);
+}
+
+.stf-guy.air .a1 {
+  transform: rotate(-14deg);
+}
+
+.stf-guy.air .sc {
+  animation-duration: 0.25s;
+}
+
+.stf-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 22px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.stf-puff {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  width: 6px;
+  height: 6px;
+  pointer-events: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--foreground) 28%, transparent);
+}
+
+@keyframes stf-art-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.72) translateY(14px);
+  }
+  62% {
+    opacity: 1;
+    transform: scale(1.06) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes stf-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes stf-flut {
+  from {
+    transform: rotate(-6deg);
+  }
+  to {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes stf-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(1.2px);
+  }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .stf-guy .ey,
+  .stf-guy .sc,
+  .stf-guy .body,
+  .stf-lab.on .stf-art-panel,
+  .stf-lab.on .stf-p {
+    animation: none;
+  }
+
+  .stf-lab.on .stf-art-panel,
+  .stf-lab.on .stf-p {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .stf-card {
+    position: relative;
+    width: 100%;
+    margin-bottom: 12px;
+    pointer-events: auto;
+  }
+}

@@ -58,6 +58,7 @@ export default async function Home() {
           count={36}
           speed={0.6}
           chromatic
+          interactive={false}
         >
           <div className="relative mx-auto flex max-w-4xl flex-col items-center px-6 text-center">
             <a
