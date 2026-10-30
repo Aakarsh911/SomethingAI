@@ -36,7 +36,7 @@ export function ReadableAutomation() {
   const reduce = useReducedMotion() ?? false;
 
   return (
-    <section id="features" className="mx-auto mt-28 max-w-6xl scroll-mt-20 px-6">
+    <section id="features" className="mx-auto mt-28 max-w-6xl px-6">
       <h2 className="max-w-md text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
         Automation you can actually read.
       </h2>

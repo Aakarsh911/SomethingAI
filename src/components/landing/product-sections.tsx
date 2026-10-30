@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { ReadableAutomation } from "@/components/landing/after-hero";
 import { HowStaircase } from "@/components/landing/how-staircase";
-import { RunNotifications } from "@/components/landing/run-notifications";
 import { WorkflowPreview } from "@/components/landing/workflow-preview";
 
 const TOOLS = [
@@ -30,21 +29,15 @@ const TOOLS = [
 export function ProductSections() {
   return (
     <>
-      <section id="product" className="relative z-10 -mt-28 scroll-mt-24 px-6">
-        <div className="mx-auto max-w-6xl">
-          <WorkflowPreview />
-
-          <div className="mt-24 sm:mt-28">
-            <RunNotifications />
-          </div>
-        </div>
+      <section id="product" className="relative z-10">
+        <WorkflowPreview />
       </section>
 
       <HowStaircase />
 
       <ReadableAutomation />
 
-      <section id="integrations" className="mx-auto mt-28 max-w-6xl scroll-mt-24 px-6">
+      <section id="integrations" className="mx-auto mt-28 max-w-6xl px-6">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <p className="text-sm font-medium text-brand">The stack</p>

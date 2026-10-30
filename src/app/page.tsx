@@ -17,7 +17,7 @@ export default async function Home() {
 
   return (
     <div className="flex min-h-[100dvh] flex-col bg-background">
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-transparent bg-background/60 backdrop-blur-xl">
+      <header className="relative z-50 border-b border-transparent bg-background/60 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-6">
           <Brand />
           <nav className="hidden items-center gap-1 text-sm text-muted-foreground md:flex">
@@ -54,7 +54,7 @@ export default async function Home() {
 
       <main className="flex-1">
         <BackgroundPaths
-          className="min-h-[100dvh] bg-transparent pt-16 text-foreground dark:bg-transparent"
+          className="min-h-[calc(100dvh-4rem)] bg-transparent text-foreground dark:bg-transparent"
           count={36}
           speed={0.6}
           chromatic

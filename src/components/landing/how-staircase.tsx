@@ -482,7 +482,7 @@ export function HowStaircase() {
   return (
     <section
       id="how"
-      className="stf-section mt-16 scroll-mt-24 py-16 sm:mt-20 sm:py-20"
+      className="stf-section relative z-20 py-16 sm:py-20"
       style={stepStyle(wash)}
     >
       <div className="stf-section-inner mx-auto max-w-6xl px-6">
