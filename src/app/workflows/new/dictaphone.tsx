@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FaMicrophone, FaStop } from "react-icons/fa";
 
 export function Dictaphone({
-  promptInputRef,
   shouldReset,
   onStopRecording
 }: {

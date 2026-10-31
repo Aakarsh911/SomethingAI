@@ -1,10 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ReactFlowProvider } from "@xyflow/react";
-import { Plus, Trash2 } from "lucide-react";
 import { AgentTrace } from "@/components/agent-trace";
 import HoldButton from "@/components/kokonutui/hold-button";
 import ParticleButton from "@/components/kokonutui/particle-button";
@@ -18,6 +13,11 @@ import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { RunSummary } from "@/lib/workflows/runtime";
 import type { WorkflowSchedule } from "@/lib/workflows/schedule";
 import type { WorkflowVersionView } from "@/lib/workflows/store";
+import { ReactFlowProvider } from "@xyflow/react";
+import { Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { requestJson } from "./request-json";
 import { ScheduleContext } from "./schedule-context";
 import type { SchedulePatch } from "./schedule-inspector";
@@ -116,6 +116,11 @@ function StudioInner({
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
   }, []);
+
+  const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
+    ssr: false
+  });
+
 
   async function persistGraph(next: WorkflowGraph): Promise<boolean> {
     if (!selected) return false;
@@ -366,12 +371,19 @@ function StudioInner({
     ];
   }, [displayName, runResult, running]);
 
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+
   return (
     <div className="flex h-full overflow-hidden bg-canvas">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-background">
+      {isSidebarVisible && <aside className={cn("flex w-64 shrink-0 flex-col border-r border-border bg-background transition-all", isSidebarVisible ? "block" : "hidden")}>
         <div className="flex items-center justify-between px-4 pt-4 pb-3">
-          <p className="text-sm font-semibold text-foreground">Workflows</p>
-          <span className="text-xs text-muted-foreground">{workflows.length}</span>
+          <div className="flex items-center justify-between w-full">
+            <p className="text-sm font-semibold text-foreground">Workflows <span className="text-xs text-muted-foreground"> ({workflows.length})</span></p>
+            <button onClick={() => setIsSidebarVisible(!isSidebarVisible)}
+              className="text-2xl font-medium hover:text-gray-500 cursor-pointer"
+              id="toggleBtn"
+              aria-label="Toggle Sidebar">☰</button>
+          </div>
         </div>
         <div className="px-3 pb-3">
           <Link href="/workflows/new" className={`${primaryButtonClass} w-full gap-1.5`}>
@@ -390,14 +402,13 @@ function StudioInner({
               {workflows.map((workflow) => {
                 const active = selected?.id === workflow.id;
                 return (
-                  <li key={workflow.id} className="group flex items-center">
+                  <li key={workflow.id} className={`group flex items-center ${active
+                    ? "border-g-blue bg-g-blue/8"
+                    : "border-transparent hover:bg-muted"}`}>
                     <Link
                       href={`/workflows/${workflow.id}`}
                       className={cn(
                         "min-w-0 flex-1 border-l-2 px-3 py-2.5 transition-colors",
-                        active
-                          ? "border-g-blue bg-g-blue/8"
-                          : "border-transparent hover:bg-muted",
                       )}
                     >
                       <span className="block truncate text-sm font-medium text-foreground">
@@ -421,12 +432,18 @@ function StudioInner({
             </ul>
           )}
         </nav>
-      </aside>
+      </aside>}
 
       <section className="flex min-w-0 flex-1 flex-col">
         {selected && graph ? (
           <>
-            <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card/75 px-5 py-3 backdrop-blur-xl">
+            <header className="relative flex flex-wrap items-center justify-between gap-3 border-b border-border bg-card/75 px-5 py-3 backdrop-blur-xl">
+              {!isSidebarVisible && (
+                <button onClick={() => setIsSidebarVisible(true)}
+                  className="mr-3 text-2xl font-medium hover:text-gray-500 cursor-pointer"
+                  id="toggleBtn"
+                  aria-label="Toggle Sidebar">☰</button>
+              )}
               <div className="min-w-0">
                 <h1 className="truncate text-base font-semibold tracking-tight">
                   {displayName}
@@ -436,7 +453,7 @@ function StudioInner({
                     className={cn(
                       "size-1.5 rounded-full",
                       saveState === "saving" &&
-                        "animate-[pulse-live_1.2s_ease-in-out_infinite] bg-warn",
+                      "animate-[pulse-live_1.2s_ease-in-out_infinite] bg-warn",
                       saveState === "error" && "bg-destructive",
                       saveState === "saved" && "bg-ok",
                     )}
@@ -615,18 +632,21 @@ function StudioInner({
                 className="glass mx-auto flex max-w-3xl items-center gap-2 rounded-2xl p-1.5"
                 onSubmit={modifyWorkflow}
               >
-                <input
-                  value={modification}
-                  onChange={(event) => setModification(event.target.value)}
-                  disabled={modifying}
-                  aria-label="Describe a workflow change"
-                  placeholder={
-                    modificationQuestions.length > 0
-                      ? "Answer here…"
-                      : "Describe a change, e.g. “add a step that summarizes the emails”…"
-                  }
-                  className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                />
+                <div className="flex">
+                  <input
+                    value={modification}
+                    onChange={(event) => setModification(event.target.value)}
+                    disabled={modifying}
+                    aria-label="Describe a workflow change"
+                    placeholder={
+                      modificationQuestions.length > 0
+                        ? "Answer here…"
+                        : "Describe a change, e.g. “add a step that summarizes the emails”…"
+                    }
+                    className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  />
+
+                </div>
                 <button
                   type="submit"
                   className={primaryButtonClass}
@@ -639,6 +659,13 @@ function StudioInner({
           </>
         ) : (
           <div className="studio-wash relative flex flex-1 flex-col items-center justify-center px-10">
+            {!isSidebarVisible && (
+              <button
+                onClick={() => setIsSidebarVisible(true)}
+                className="absolute top-4 left-4 text-2xl font-medium hover:text-gray-500 cursor-pointer"
+                aria-label="Open Sidebar"
+              >☰</button>
+            )}
             <div className="relative max-w-md">
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                 Open a workflow
