@@ -18,6 +18,7 @@ import { Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Dictaphone } from "./new/dictaphone";
 import { requestJson } from "./request-json";
 import { ScheduleContext } from "./schedule-context";
 import type { SchedulePatch } from "./schedule-inspector";
@@ -116,11 +117,6 @@ function StudioInner({
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
     };
   }, []);
-
-  const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
-    ssr: false
-  });
-
 
   async function persistGraph(next: WorkflowGraph): Promise<boolean> {
     if (!selected) return false;
@@ -371,6 +367,7 @@ function StudioInner({
     ];
   }, [displayName, runResult, running]);
 
+  const modificationInputRef = useRef<HTMLInputElement>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
   return (
@@ -632,8 +629,9 @@ function StudioInner({
                 className="glass mx-auto flex max-w-3xl items-center gap-2 rounded-2xl p-1.5"
                 onSubmit={modifyWorkflow}
               >
-                <div className="flex">
+                <div className="flex justify-between w-full">
                   <input
+                    ref={modificationInputRef}
                     value={modification}
                     onChange={(event) => setModification(event.target.value)}
                     disabled={modifying}
@@ -645,15 +643,19 @@ function StudioInner({
                     }
                     className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
                   />
+                  <div className="flex ml-auto">
+                    <Dictaphone promptInputRef={modificationInputRef}
+                    />
+                    <button
+                      type="submit"
+                      className={primaryButtonClass}
+                      disabled={modifying || !modification.trim()}
+                    >
+                      {modifying ? "Changing…" : "Change"}
+                    </button>
+                  </div>
 
                 </div>
-                <button
-                  type="submit"
-                  className={primaryButtonClass}
-                  disabled={modifying || !modification.trim()}
-                >
-                  {modifying ? "Changing…" : "Change"}
-                </button>
               </form>
             </div>
           </>

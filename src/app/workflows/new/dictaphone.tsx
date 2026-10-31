@@ -7,7 +7,7 @@ export function Dictaphone({
   shouldReset,
   onStopRecording
 }: {
-  promptInputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  promptInputRef?: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   shouldReset?: boolean;
   onStopRecording?: (stopFn: () => void) => void;
 }) {
@@ -23,28 +23,32 @@ export function Dictaphone({
     if (shouldReset) {
       transcriptRef.current = "";
       finalTranscriptsRef.current = [];
-      // Clear the textarea
-      const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
-      if (textarea) {
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      // Clear the textarea or input
+      const element = document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
+      if (element) {
+        const isTextarea = element.tagName === 'TEXTAREA';
+        const prototype = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
         if (nativeInputValueSetter) {
-          nativeInputValueSetter.call(textarea, "");
+          nativeInputValueSetter.call(element, "");
           const event = new Event('input', { bubbles: true });
-          textarea.dispatchEvent(event);
+          element.dispatchEvent(event);
         }
       }
     }
   }, [shouldReset]);
 
   const updateTextarea = useCallback((text: string) => {
-    // Find the textarea in the AI_Prompt component and update it
-    const textarea = document.querySelector('textarea[placeholder*="automate"]') as HTMLTextAreaElement;
-    if (textarea) {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+    // Find the textarea or input in the component and update it
+    const element = document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
+    if (element) {
+      const isTextarea = element.tagName === 'TEXTAREA';
+      const prototype = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
       if (nativeInputValueSetter) {
-        nativeInputValueSetter.call(textarea, text);
+        nativeInputValueSetter.call(element, text);
         const event = new Event('input', { bubbles: true });
-        textarea.dispatchEvent(event);
+        element.dispatchEvent(event);
       }
     }
   }, []);
