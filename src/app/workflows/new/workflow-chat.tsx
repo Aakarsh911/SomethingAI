@@ -81,7 +81,6 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
-
   /**
    * Sends the whole conversation, not just the latest turn.
    *

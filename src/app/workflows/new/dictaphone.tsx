@@ -56,8 +56,9 @@ export function Dictaphone({
     }
   }, []);
 
+  // Completely clean up all recording resources
   const stopRecording = useCallback(() => {
-    // Send end-of-stream signal
+    // Send end-of-stream signal and close ws
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send('');
       wsRef.current.close();
