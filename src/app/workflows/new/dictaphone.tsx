@@ -20,6 +20,9 @@ export function Dictaphone({
   const finalTranscriptsRef = useRef<string[]>([]);
 
   useEffect(() => {
+    // reset the partial and final transcript whenever shouldReset prop changes to true 
+    // (usually when speaker submits prompt)
+    // resets HTML input element for prompting as well
     if (shouldReset) {
       transcriptRef.current = "";
       finalTranscriptsRef.current = [];
