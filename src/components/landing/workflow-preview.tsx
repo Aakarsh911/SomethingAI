@@ -96,7 +96,7 @@ export function WorkflowPreview() {
       const st = ScrollTrigger.create({
         trigger: pin,
         start: "top top",
-        end: () => `+=${Math.round(window.innerHeight * 1.85)}`,
+        end: () => `+=${Math.round(window.innerHeight * 2.4)}`,
         pin: true,
         anticipatePin: 1,
         invalidateOnRefresh: true,
@@ -128,11 +128,11 @@ export function WorkflowPreview() {
     { scope: rootRef, dependencies: [] },
   );
 
-  const expand = staticMode ? 0 : span(progress, 0, 0.86);
-  const typed = staticMode ? TYPE_LEN : Math.round(span(progress, 0.06, 0.48) * TYPE_LEN);
+  const expand = staticMode ? 0 : span(progress, 0, 0.36);
+  const typed = staticMode ? TYPE_LEN : Math.round(span(progress, 0.4, 0.68) * TYPE_LEN);
   const mapped = staticMode
     ? NODE_COUNT
-    : Math.round(span(progress, 0.42, 0.84) * NODE_COUNT);
+    : Math.round(span(progress, 0.66, 0.9) * NODE_COUNT);
   const tilt = staticMode ? 14 : lerp(14, 0, expand);
   const startW = Math.min(1152, Math.max(320, vw - 48));
   const stageW = lerp(startW, vw, expand);
