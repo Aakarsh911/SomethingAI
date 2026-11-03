@@ -369,6 +369,11 @@ function StudioInner({
 
   const modificationInputRef = useRef<HTMLInputElement>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isRecordinggg, setIsRecordinggg] = useState(false);
+
+  function stopRecordingOnSubmit() {
+    setIsRecordinggg(false)
+  }
 
   return (
     <div className="flex h-full overflow-hidden bg-canvas">
@@ -644,10 +649,14 @@ function StudioInner({
                     className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground"
                   />
                   <div className="flex ml-auto">
-                    <Dictaphone promptInputRef={modificationInputRef}
+                    <Dictaphone
+                      promptInputRef={modificationInputRef}
+                      isRecordinggg={isRecordinggg}
+                      setIsRecordinggg={setIsRecordinggg}
                     />
                     <button
                       type="submit"
+                      onClick={stopRecordingOnSubmit}
                       className={primaryButtonClass}
                       disabled={modifying || !modification.trim()}
                     >

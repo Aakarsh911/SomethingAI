@@ -1,17 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect, useRef } from "react";
 import { FaMicrophone, FaStop } from "react-icons/fa";
 
 export function Dictaphone({
   shouldReset,
-  onStopRecording
+  onStopRecording,
+  isRecordinggg,
+  setIsRecordinggg
 }: {
+  isRecordinggg: boolean;
+  setIsRecordinggg: Dispatch<SetStateAction<boolean>>;
   promptInputRef?: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   shouldReset?: boolean;
   onStopRecording?: (stopFn: () => void) => void;
 }) {
-  const [isRecording, setIsRecording] = useState(false);
+  // const [isRecording, setIsRecording] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -81,9 +85,10 @@ export function Dictaphone({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-
-    setIsRecording(false);
-  }, []);
+    if (setIsRecordinggg) {
+      setIsRecordinggg(false);
+    }
+  }, [setIsRecordinggg]);
 
   useEffect(() => {
     if (onStopRecording) {
@@ -189,7 +194,9 @@ export function Dictaphone({
         console.log('WebSocket closed');
       };
 
-      setIsRecording(true);
+      if (setIsRecordinggg) {
+        setIsRecordinggg(true);
+      }
 
     } catch (error) {
       console.error('Error accessing microphone:', error);
@@ -197,7 +204,7 @@ export function Dictaphone({
     }
   };
 
-  return !isRecording ? (
+  return !isRecordinggg ? (
     <button
       type="button"
       onClick={startRecording}

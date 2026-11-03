@@ -81,6 +81,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
+  const [isRecordinggg, setIsRecordinggg] = useState(false);
   /**
    * Sends the whole conversation, not just the latest turn.
    *
@@ -361,6 +362,8 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           showAttach={false}
           customControls={
             <Dictaphone
+              isRecordinggg={isRecordinggg}
+              setIsRecordinggg={setIsRecordinggg}
               promptInputRef={promptInputRef}
               shouldReset={shouldResetTranscript}
               onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
