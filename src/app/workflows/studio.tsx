@@ -14,10 +14,15 @@ import {
 } from "@/components/kokonutui/status-island";
 import type { McpServerView } from "@/lib/mcp/servers";
 import { cn } from "@/lib/utils";
+import type { NeededConnection } from "@/lib/mcp/needed";
 import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { RunSummary } from "@/lib/workflows/runtime";
 import type { WorkflowSchedule } from "@/lib/workflows/schedule";
 import type { WorkflowVersionView } from "@/lib/workflows/store";
+import {
+  mergeNeededConnections,
+  NeededConnectionsPanel,
+} from "./needed-connections";
 import { requestJson } from "./request-json";
 import { ScheduleContext } from "./schedule-context";
 import type { SchedulePatch } from "./schedule-inspector";
@@ -57,11 +62,51 @@ type ModificationMessage = {
   content: string;
 };
 
+const STUDIO_MODIFY_KEY = "somethingai.studio.modify.v1";
+
+type StoredStudioModify = {
+  workflowId: string;
+  messages: ModificationMessage[];
+};
+
+function readStudioModify(): StoredStudioModify | null {
+  try {
+    const raw = sessionStorage.getItem(STUDIO_MODIFY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredStudioModify;
+    if (!parsed.workflowId || !Array.isArray(parsed.messages)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStudioModify(payload: StoredStudioModify) {
+  sessionStorage.setItem(STUDIO_MODIFY_KEY, JSON.stringify(payload));
+}
+
+function clearStudioModify() {
+  sessionStorage.removeItem(STUDIO_MODIFY_KEY);
+}
+
+function consumeConnectReturn(): { connected: string | null; error: string | null } {
+  const url = new URL(window.location.href);
+  const connected = url.searchParams.get("connected");
+  const error = url.searchParams.get("error");
+  if (connected || error) {
+    url.searchParams.delete("connected");
+    url.searchParams.delete("error");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  return { connected, error };
+}
+
 export function WorkflowStudio(props: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
   versions: WorkflowVersionView[];
   connections: McpServerView[];
+  neededConnections?: NeededConnection[];
 }) {
   // Remount when the selected workflow changes so local graph state is
   // initialized from props instead of synced in an effect.
@@ -73,11 +118,13 @@ function StudioInner({
   selected,
   versions,
   connections,
+  neededConnections = [],
 }: {
   workflows: WorkflowListItem[];
   selected: WorkflowDetail | null;
   versions: WorkflowVersionView[];
   connections: McpServerView[];
+  neededConnections?: NeededConnection[];
 }) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(selected?.name ?? "");
@@ -101,10 +148,13 @@ function StudioInner({
   const [modificationFeedback, setModificationFeedback] = useState<string | null>(
     null,
   );
+  const [editNeeds, setEditNeeds] = useState<NeededConnection[]>([]);
+  const [dismissedNeedsKey, setDismissedNeedsKey] = useState<string | null>(null);
   const [running, setRunning] = useState<false | "dry" | "live">(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const saveTimer = useRef<number | null>(null);
   const lastSaved = useRef<string>(selected ? stableStringify(selected.graph) : "");
+  const modifyingRef = useRef(false);
 
   // Tool steps with no tool chosen; live runs are blocked until there are none.
   const unconfigured = (graph?.nodes ?? [])
@@ -185,39 +235,35 @@ function StudioInner({
     router.refresh();
   }
 
-  async function modifyWorkflow(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected || !graph || modifying) return;
+  const connectedIds = useMemo(
+    () => new Set(connections.map((server) => server.id)),
+    [connections],
+  );
+  const shownNeeds = useMemo(
+    () =>
+      mergeNeededConnections(neededConnections, editNeeds).filter(
+        (need) =>
+          need.server.connection?.status !== "CONNECTED" &&
+          !connectedIds.has(need.server.id),
+      ),
+    [neededConnections, editNeeds, connectedIds],
+  );
+  const shownNeedsKey = shownNeeds.map((need) => need.server.id).join(",");
+  const connectOpen = shownNeeds.length > 0 && dismissedNeedsKey !== shownNeedsKey;
 
-    const instruction = modification.trim();
-    if (!instruction) return;
+  async function applyModification(messages: ModificationMessage[]) {
+    if (!selected || modifyingRef.current) return;
 
+    modifyingRef.current = true;
     setModifying(true);
-
-    // The model must edit the same graph the user can see. Flush a pending
-    // drag/add/delete before the server loads the workflow as its baseline.
-    if (saveTimer.current) {
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    const saved = await persistGraph(graph);
-    if (!saved) {
-      setModifying(false);
-      return;
-    }
-
-    const messages: ModificationMessage[] = [
-      ...modificationMessages,
-      { role: "user", content: instruction },
-    ];
-    setModification("");
     setModificationQuestions([]);
     setModificationFeedback(null);
     setError(null);
+    writeStudioModify({ workflowId: selected.id, messages });
 
-    // The endpoint answers with either clarifying questions or the new workflow.
     const result = await requestJson<{
       questions?: ModificationQuestion[];
+      connections?: NeededConnection[];
       workflow?: { name: string; graph: WorkflowGraph; schedule: WorkflowSchedule };
       versions?: WorkflowVersionView[];
       droppedArgs?: string[];
@@ -226,6 +272,7 @@ function StudioInner({
       body: { messages, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone },
       fallback: "Could not change the workflow.",
     });
+    modifyingRef.current = false;
     setModifying(false);
 
     // On failure the conversation so far is kept, so a retry still carries it.
@@ -235,13 +282,20 @@ function StudioInner({
       return;
     }
 
-    const { questions, workflow, versions, droppedArgs = [] } = result.data;
+    const { questions, connections: needed, workflow, versions, droppedArgs = [] } =
+      result.data;
+    if (needed?.length) {
+      setModificationMessages(messages);
+      setEditNeeds(needed);
+      return;
+    }
     if (questions?.length) {
       const assistantMessage = questions
         .map((question) => `- (${question.id}) ${question.question}`)
         .join("\n");
       setModificationMessages([...messages, { role: "assistant", content: assistantMessage }]);
       setModificationQuestions(questions);
+      setEditNeeds([]);
       return;
     }
     if (!workflow) {
@@ -250,6 +304,8 @@ function StudioInner({
       return;
     }
 
+    clearStudioModify();
+    setEditNeeds([]);
     setGraph(workflow.graph);
     setCanvasKey((value) => value + 1);
     setDisplayName(workflow.name);
@@ -267,6 +323,54 @@ function StudioInner({
     );
     router.refresh();
   }
+
+  async function modifyWorkflow(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected || !graph || modifying) return;
+
+    const instruction = modification.trim();
+    if (!instruction) return;
+
+    // The model must edit the same graph the user can see. Flush a pending
+    // drag/add/delete before the server loads the workflow as its baseline.
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const saved = await persistGraph(graph);
+    if (!saved) return;
+
+    const messages: ModificationMessage[] = [
+      ...modificationMessages,
+      { role: "user", content: instruction },
+    ];
+    setModification("");
+    await applyModification(messages);
+  }
+
+  function continueAfterConnect() {
+    if (selected && modificationMessages.length > 0) {
+      void applyModification(modificationMessages);
+      return;
+    }
+    router.refresh();
+  }
+
+  useEffect(() => {
+    const stored = readStudioModify();
+    const { connected, error: returnedError } = consumeConnectReturn();
+    queueMicrotask(() => {
+      if (returnedError) setError(returnedError);
+      if (stored && selected && stored.workflowId === selected.id) {
+        setModificationMessages(stored.messages);
+        if (connected) void applyModification(stored.messages);
+      } else if (connected) {
+        router.refresh();
+      }
+    });
+    // OAuth return is handled once when this workflow screen mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Runs the workflow and waits for the result.
@@ -474,6 +578,16 @@ function StudioInner({
                     </select>
                   </label>
                 ) : null}
+                {shownNeeds.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setDismissedNeedsKey(null)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/10 px-2.5 py-1 text-xs text-brand"
+                  >
+                    {shownNeeds.length} connection
+                    {shownNeeds.length === 1 ? "" : "s"} needed
+                  </button>
+                ) : null}
                 {unconfigured.length > 0 ? (
                   <span
                     className="inline-flex items-center gap-1.5 rounded-full border border-warn/30 bg-warn/10 px-2.5 py-1 text-xs text-[color:var(--warn)]"
@@ -500,15 +614,21 @@ function StudioInner({
                 <ParticleButton
                   size="lg"
                   className="h-9"
-                  disabled={running !== false || unconfigured.length > 0}
+                  disabled={
+                    running !== false ||
+                    unconfigured.length > 0 ||
+                    shownNeeds.length > 0
+                  }
                   pendingLabel="Running"
                   successLabel="Finished"
                   errorLabel="Failed"
                   onClick={() => runNow(false)}
                   title={
-                    unconfigured.length > 0
-                      ? "Every step needs a tool before this can run"
-                      : undefined
+                    shownNeeds.length > 0
+                      ? "Connect the integrations this workflow uses before running"
+                      : unconfigured.length > 0
+                        ? "Every step needs a tool before this can run"
+                        : undefined
                   }
                 >
                   Run now
@@ -578,6 +698,28 @@ function StudioInner({
                   />
                 </ScheduleContext.Provider>
               </ReactFlowProvider>
+              {shownNeeds.length > 0 && connectOpen ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
+                  <div className="pointer-events-auto w-full max-w-lg max-h-[min(22rem,42vh)] overflow-y-auto overflow-x-hidden rounded-2xl shadow-xl">
+                    <NeededConnectionsPanel
+                      key={shownNeedsKey}
+                      needs={shownNeeds}
+                      returnTo={selected ? `/workflows/${selected.id}` : "/workflows"}
+                      busy={modifying}
+                      onDismiss={() => setDismissedNeedsKey(shownNeedsKey)}
+                      onBeforeRedirect={() => {
+                        if (selected && modificationMessages.length > 0) {
+                          writeStudioModify({
+                            workflowId: selected.id,
+                            messages: modificationMessages,
+                          });
+                        }
+                      }}
+                      onReady={continueAfterConnect}
+                    />
+                  </div>
+                </div>
+              ) : null}
               {modifying ? (
                 <div
                   className="absolute inset-x-0 bottom-4 z-40 flex justify-center px-4"

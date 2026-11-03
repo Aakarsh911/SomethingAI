@@ -157,6 +157,15 @@ export type WorkflowGraph = z.infer<typeof graphSchema>;
 export type WorkflowNode = z.infer<typeof node>;
 export type WorkflowEdge = WorkflowGraph["edges"][number];
 
+/** Unique MCP server slugs named by tool steps. */
+export function toolServerSlugs(graph: WorkflowGraph): string[] {
+  const slugs = new Set<string>();
+  for (const item of graph.nodes) {
+    if (item.kind === "tool") slugs.add(item.serverSlug);
+  }
+  return [...slugs];
+}
+
 /** A new workflow starts as a single trigger so the Zod invariant holds. */
 export function emptyGraph(): WorkflowGraph {
   return {

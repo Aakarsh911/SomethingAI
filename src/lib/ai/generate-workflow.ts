@@ -111,11 +111,25 @@ const planSchema = z.object({
     .describe(
       "Values only the user can supply. Non-empty means the draft is not ready: leave steps empty and ask. Empty when everything needed is known.",
     ),
+  connect: z
+    .array(
+      z.object({
+        serverSlug: z
+          .string()
+          .describe("Exact slug from CONNECTABLE INTEGRATIONS."),
+        reason: z
+          .string()
+          .describe("One short line on why this workflow needs that integration."),
+      }),
+    )
+    .describe(
+      "Integrations the user must connect before this workflow can be built. Non-empty means leave steps empty. Empty when every needed tool is already in AVAILABLE TOOLS.",
+    ),
   problem: z
     .string()
     .nullable()
     .describe(
-      "Set when the request cannot be built from the available tools, explaining what is missing. Leave steps empty in that case.",
+      "Set when the request cannot be built from AVAILABLE TOOLS or CONNECTABLE INTEGRATIONS, explaining what is missing. Leave steps empty in that case.",
     ),
 });
 
@@ -149,14 +163,45 @@ export type WorkflowQuestion = z.infer<typeof questionSchema>;
  * in. A union rather than a draft with an optional questions field, so a caller
  * cannot accidentally save a draft that was never really finished.
  */
+export type ConnectNeed = {
+  serverSlug: string;
+  reason: string;
+};
+
 export type GenerationResult =
   | { kind: "draft"; draft: WorkflowDraft }
-  | { kind: "questions"; questions: WorkflowQuestion[] };
+  | { kind: "questions"; questions: WorkflowQuestion[] }
+  | { kind: "connect"; needs: ConnectNeed[] };
 
 /** One turn of the builder conversation, as sent by the client. */
 export type BuilderMessage = { role: "user" | "assistant"; content: string };
 
 export class GenerationError extends Error {}
+
+/** Turns a provider failure into a message the builder can show. */
+function mappedProviderError(error: unknown): Error {
+  if (error instanceof OpenAI.APIError) {
+    if (
+      error.code === "credit_balance_exhausted" ||
+      error.type === "insufficient_quota"
+    ) {
+      return new GenerationError(
+        "OpenAI has no credits left on this API key. Add credits in the OpenAI billing settings and try again.",
+      );
+    }
+    if (error.status === 429) {
+      return new GenerationError(
+        "The model is rate-limited right now. Wait a moment and try again.",
+      );
+    }
+    if (error.status === 401) {
+      return new GenerationError(
+        "The OpenAI API key was refused. Check OPENAI_API_KEY.",
+      );
+    }
+  }
+  return error instanceof Error ? error : new Error("Unknown provider error.");
+}
 
 export type ExistingWorkflowContext = {
   name: string;
@@ -171,6 +216,7 @@ export type ExistingWorkflowContext = {
 
 function systemPrompt(
   tools: AvailableTool[],
+  connectable: { slug: string; name: string }[],
   timezone: string,
   now: Date,
   identity: Identity,
@@ -199,6 +245,11 @@ ${mode}
 AVAILABLE TOOLS — you may only use these. Copy slugs exactly.
 ${renderToolsForPrompt(tools)}
 
+CONNECTABLE INTEGRATIONS — not yet in AVAILABLE TOOLS. If the request needs
+one of these, put it in "connect", leave steps empty, and do not set "problem".
+Copy the slug exactly.
+${renderConnectableForPrompt(connectable)}
+
 CONTEXT
 - The user's timezone is ${timezone}.
 - The current time there is ${now.toLocaleString("en-US", { timeZone: timezone })}.
@@ -209,8 +260,11 @@ ${renderAccountsForPrompt(identity.accounts)}
 
 RULES
 1. Never invent a serverSlug or toolSlug. If the request needs an integration
-   that is not listed, set "problem" explaining which one is missing, and
-   return no steps. Do not substitute a vaguely similar tool.
+   that is in CONNECTABLE INTEGRATIONS, put it in "connect", leave steps and
+   questions empty, and do not set "problem". If it is in neither AVAILABLE
+   TOOLS nor CONNECTABLE INTEGRATIONS, set "problem" explaining which one is
+   missing. Do not substitute a vaguely similar tool. Ask questions only after
+   every needed integration is already in AVAILABLE TOOLS.
 1a. Summarising, rewriting, extracting, classifying and composing text are NOT
    tools. Use a step with kind "llm" and an "instruction" for those. Only an
    external integration being absent counts as a "problem" — never report a
@@ -275,6 +329,17 @@ export type Identity = {
   email: string;
   accounts: { serverSlug: string; serverName: string; label: string | null }[];
 };
+
+function renderConnectableForPrompt(
+  connectable: { slug: string; name: string }[],
+): string {
+  if (connectable.length === 0) {
+    return "(none — every listed integration is already connected, or the catalog is empty)";
+  }
+  return connectable
+    .map((server) => `- ${server.slug} — ${server.name}`)
+    .join("\n");
+}
 
 function renderAccountsForPrompt(accounts: Identity["accounts"]): string {
   if (accounts.length === 0) return "- Nothing is connected.";
@@ -460,6 +525,7 @@ function planToGraph(
 export async function generateWorkflowDraft(input: {
   messages: BuilderMessage[];
   tools: AvailableTool[];
+  connectable?: { slug: string; name: string }[];
   timezone: string;
   identity: Identity;
   existing?: ExistingWorkflowContext;
@@ -469,7 +535,8 @@ export async function generateWorkflowDraft(input: {
   if (!apiKey) {
     throw new GenerationError("OPENAI_API_KEY is not set.");
   }
-  if (input.tools.length === 0 && !input.existing) {
+  const connectable = input.connectable ?? [];
+  if (input.tools.length === 0 && connectable.length === 0 && !input.existing) {
     throw new GenerationError(
       "Connect an MCP server first — there are no tools to build a workflow from.",
     );
@@ -481,23 +548,29 @@ export async function generateWorkflowDraft(input: {
   const now = input.now ?? new Date();
   const client = new OpenAI({ apiKey });
 
-  const response = await client.responses.parse({
-    model: MODEL,
-    input: [
-      {
-        role: "system",
-        content: systemPrompt(
-          input.tools,
-          input.timezone,
-          now,
-          input.identity,
-          input.existing,
-        ),
-      },
-      ...input.messages,
-    ],
-    text: { format: zodTextFormat(planSchema, "workflow_plan") },
-  });
+  let response: Awaited<ReturnType<typeof client.responses.parse>>;
+  try {
+    response = await client.responses.parse({
+      model: MODEL,
+      input: [
+        {
+          role: "system",
+          content: systemPrompt(
+            input.tools,
+            connectable,
+            input.timezone,
+            now,
+            input.identity,
+            input.existing,
+          ),
+        },
+        ...input.messages,
+      ],
+      text: { format: zodTextFormat(planSchema, "workflow_plan") },
+    });
+  } catch (error) {
+    throw mappedProviderError(error);
+  }
 
   const plan = response.output_parsed;
   if (!plan) {
@@ -505,6 +578,20 @@ export async function generateWorkflowDraft(input: {
   }
   if (plan.problem) {
     throw new GenerationError(plan.problem);
+  }
+
+  const connected = new Set(
+    input.identity.accounts.map((account) => account.serverSlug),
+  );
+  const offered = new Set(connectable.map((server) => server.slug));
+  const needs = plan.connect
+    .filter(
+      (need) =>
+        offered.has(need.serverSlug) && !connected.has(need.serverSlug),
+    )
+    .slice(0, 6);
+  if (needs.length > 0) {
+    return { kind: "connect", needs };
   }
 
   // Checked before the empty-steps guard: an unanswered question is the

@@ -3,11 +3,13 @@
 import { AgentTrace } from "@/components/agent-trace";
 import AI_Prompt from "@/components/kokonutui/ai-prompt";
 import ParticleButton from "@/components/kokonutui/particle-button";
+import type { NeededConnection } from "@/lib/mcp/needed";
 import type { GeneratedTrigger } from "@/lib/workflows/schedule";
 import { ArrowUpRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { NeededConnectionsPanel } from "../needed-connections";
 
 const Dictaphone = dynamic(() => import("./dictaphone").then(mod => ({ default: mod.Dictaphone })), {
   ssr: false
@@ -39,12 +41,6 @@ type Question = {
   suggestion: string | null;
 };
 
-type Turn =
-  | { role: "user"; text: string }
-  | { role: "draft"; draft: Draft }
-  | { role: "questions"; questions: Question[]; answered: boolean }
-  | { role: "error"; text: string };
-
 /**
  * The conversation the model sees, kept alongside the rendered turns.
  *
@@ -53,6 +49,55 @@ type Turn =
  * asks again.
  */
 type Message = { role: "user" | "assistant"; content: string };
+
+type Turn =
+  | { role: "user"; text: string }
+  | { role: "draft"; draft: Draft }
+  | { role: "questions"; questions: Question[]; answered: boolean }
+  | { role: "connect"; needs: NeededConnection[] }
+  | { role: "error"; text: string };
+
+const BUILDER_STORAGE_KEY = "somethingai.builder.v1";
+
+type StoredBuilder = {
+  messages: Message[];
+  turns: Turn[];
+};
+
+function readBuilder(): StoredBuilder | null {
+  try {
+    const raw = sessionStorage.getItem(BUILDER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredBuilder;
+    if (!Array.isArray(parsed.messages) || !Array.isArray(parsed.turns)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeBuilder(payload: StoredBuilder) {
+  sessionStorage.setItem(BUILDER_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function clearBuilder() {
+  sessionStorage.removeItem(BUILDER_STORAGE_KEY);
+}
+
+function consumeConnectReturn(): { connected: string | null; error: string | null } {
+  const url = new URL(window.location.href);
+  const connected = url.searchParams.get("connected");
+  const error = url.searchParams.get("error");
+  if (connected || error) {
+    url.searchParams.delete("connected");
+    url.searchParams.delete("error");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, "", next);
+  }
+  return { connected, error };
+}
 
 function questionsAsMessage(questions: Question[]): string {
   return questions.map((q) => `- (${q.id}) ${q.question}`).join("\n");
@@ -70,7 +115,7 @@ const EXAMPLES = [
   "When I ask, get my latest 5 emails and summarise them",
 ];
 
-export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
+export function WorkflowChat() {
   const router = useRouter();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -81,6 +126,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
   const [shouldResetTranscript, setShouldResetTranscript] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement | null>(null);
   const stopRecordingRef = useRef<(() => void) | null>(null);
+  const generatingRef = useRef(false);
 
   /**
    * Sends the whole conversation, not just the latest turn.
@@ -89,9 +135,15 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
    * just appended to it, and the state update has not committed yet.
    */
   async function send(next: Message[], display: Turn[], signal?: AbortSignal) {
-    if (generating) return;
+    if (generatingRef.current) return;
 
-    setTurns((prev) => [...prev, ...display]);
+    generatingRef.current = true;
+    setTurns((prev) => {
+      const base = display.length === 0
+        ? prev
+        : [...prev.filter((turn) => turn.role !== "connect"), ...display];
+      return base;
+    });
     setMessages(next);
     setGenerating(true);
 
@@ -111,39 +163,97 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
       const body = (await response.json()) as {
         draft?: Draft;
         questions?: Question[];
+        connections?: NeededConnection[];
         error?: string;
       };
 
-      if (response.ok && body.questions?.length) {
-        setMessages([
-          ...next,
-          { role: "assistant", content: questionsAsMessage(body.questions) },
-        ]);
-        setTurns((prev) => [
-          ...prev,
-          { role: "questions", questions: body.questions!, answered: false },
-        ]);
+      if (response.ok && body.connections?.length) {
+        setTurns((prev) => {
+          const nextTurns: Turn[] = [
+            ...prev.filter((turn) => turn.role !== "connect"),
+            { role: "connect", needs: body.connections! },
+          ];
+          writeBuilder({ messages: next, turns: nextTurns });
+          return nextTurns;
+        });
         return;
       }
 
-      setTurns((prev) => [
-        ...prev,
-        response.ok && body.draft
-          ? { role: "draft", draft: body.draft }
-          : { role: "error", text: body.error ?? "Something went wrong." },
-      ]);
+      if (response.ok && body.questions?.length) {
+        const withAssistant = [
+          ...next,
+          { role: "assistant" as const, content: questionsAsMessage(body.questions) },
+        ];
+        setMessages(withAssistant);
+        setTurns((prev) => {
+          const nextTurns: Turn[] = [
+            ...prev.filter((turn) => turn.role !== "connect"),
+            { role: "questions", questions: body.questions!, answered: false },
+          ];
+          writeBuilder({ messages: withAssistant, turns: nextTurns });
+          return nextTurns;
+        });
+        return;
+      }
+
+      setTurns((prev) => {
+        const nextTurns: Turn[] = [
+          ...prev.filter((turn) => turn.role !== "connect"),
+          response.ok && body.draft
+            ? { role: "draft", draft: body.draft }
+            : { role: "error", text: body.error ?? "Something went wrong." },
+        ];
+        writeBuilder({ messages: next, turns: nextTurns });
+        return nextTurns;
+      });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
       }
       setTurns((prev) => [
-        ...prev,
+        ...prev.filter((turn) => turn.role !== "connect"),
         { role: "error", text: "Could not reach the server." },
       ]);
     } finally {
+      generatingRef.current = false;
       setGenerating(false);
     }
   }
+
+  function persistBuilder() {
+    if (messages.length === 0) return;
+    writeBuilder({ messages, turns });
+  }
+
+  function continueAfterConnect() {
+    if (messages.length === 0) return;
+    setTraceRun((current) => current + 1);
+    void send(messages, []);
+  }
+
+  useEffect(() => {
+    const stored = readBuilder();
+    const { connected, error } = consumeConnectReturn();
+    if (!connected && !error) return;
+
+    queueMicrotask(() => {
+      if (stored) {
+        setMessages(stored.messages);
+        setTurns(
+          error
+            ? [...stored.turns, { role: "error", text: error }]
+            : stored.turns,
+        );
+      } else if (error) {
+        setTurns([{ role: "error", text: error }]);
+      }
+
+      if (stored && connected) {
+        setTraceRun((current) => current + 1);
+        void send(stored.messages, []);
+      }
+    });
+  }, []);
 
   function generate(text: string, signal?: AbortSignal) {
     const trimmed = text.trim();
@@ -186,6 +296,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
       };
 
       if (response.ok && body.workflow) {
+        clearBuilder();
         router.push(`/workflows`);
         router.refresh();
         return;
@@ -224,21 +335,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           </div>
         ) : null}
 
-        {!hasConnections && (
-          <p className="mx-auto mt-8 max-w-lg text-center text-sm text-foreground/80">
-            You have no connected integrations yet, so there are no tools to build
-            a workflow from.{" "}
-            <a
-              className="font-medium text-foreground underline underline-offset-4"
-              href="/settings/integrations"
-            >
-              Connect one first
-            </a>
-            .
-          </p>
-        )}
-
-        {empty && hasConnections ? (
+        {empty ? (
           <div className="mx-auto mt-8 flex w-full max-w-lg flex-col gap-2">
             {EXAMPLES.map((example) => (
               <button
@@ -265,6 +362,19 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
                 >
                   {turn.text}
                 </p>
+              );
+            }
+
+            if (turn.role === "connect") {
+              return (
+                <NeededConnectionsPanel
+                  key={turn.needs.map((need) => need.server.id).join(",")}
+                  needs={turn.needs}
+                  returnTo="/workflows/new"
+                  busy={generating}
+                  onBeforeRedirect={persistBuilder}
+                  onReady={continueAfterConnect}
+                />
               );
             }
 
@@ -355,7 +465,7 @@ export function WorkflowChat({ hasConnections }: { hasConnections: boolean }) {
           className="py-2 mx-auto"
           commands={[]}
           defaultModel="SomethingAI"
-          disabled={!hasConnections}
+          disabled={generating}
           headerText=""
           models={[{ name: "SomethingAI" }]}
           placeholder="Describe what you want to automate…"
