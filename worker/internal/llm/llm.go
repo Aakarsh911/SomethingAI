@@ -41,46 +41,6 @@ type endpoint struct {
 	http    *http.Client
 }
 
-type spec struct {
-	keyEnv         string
-	defaultModel   string
-	defaultBaseURL string
-	// legacy* are pre-LLM_* variable names, kept so old .env files work.
-	legacyModelEnvs []string
-	legacyBaseURL   string
-	requiresKey     bool
-	build           func(endpoint) Provider
-}
-
-// providers lists every supported provider. Adding one is a type plus an entry.
-var providers = map[string]spec{
-	"openai": {
-		keyEnv:          "OPENAI_API_KEY",
-		defaultModel:    "gpt-5.5",
-		defaultBaseURL:  "https://api.openai.com/v1",
-		legacyModelEnvs: []string{"OPENAI_STEP_MODEL", "OPENAI_MODEL"},
-		legacyBaseURL:   "OPENAI_BASE_URL",
-		requiresKey:     true,
-		build:           func(e endpoint) Provider { return &openAI{e} },
-	},
-	"anthropic": {
-		keyEnv:         "ANTHROPIC_API_KEY",
-		defaultModel:   "claude-sonnet-5-5",
-		defaultBaseURL: "https://api.anthropic.com/v1",
-		requiresKey:    true,
-		build:          func(e endpoint) Provider { return &anthropic{e} },
-	},
-	"gemini": {
-		keyEnv:         "GEMINI_API_KEY",
-		defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta",
-		requiresKey:    true,
-		build:          func(e endpoint) Provider { return &gemini{e} },
-	},
-	"openai-compatible": {
-		build: func(e endpoint) Provider { return &openAICompatible{e} },
-	},
-}
-
 // ConfigFromEnv reads LLM_PROVIDER (default "openai"), LLM_API_KEY,
 // LLM_STEP_MODEL or LLM_MODEL, and LLM_BASE_URL, falling back to the
 // provider's own variables.
