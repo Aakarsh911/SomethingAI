@@ -85,9 +85,9 @@ export function Dictaphone({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    if (setIsRecordinggg) {
-      setIsRecordinggg(false);
-    }
+
+    setIsRecordinggg(false);
+
   }, [setIsRecordinggg]);
 
   useEffect(() => {
@@ -194,9 +194,7 @@ export function Dictaphone({
         console.log('WebSocket closed');
       };
 
-      if (setIsRecordinggg) {
-        setIsRecordinggg(true);
-      }
+      setIsRecordinggg(true);
 
     } catch (error) {
       console.error('Error accessing microphone:', error);

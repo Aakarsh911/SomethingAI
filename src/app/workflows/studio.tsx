@@ -370,9 +370,12 @@ function StudioInner({
   const modificationInputRef = useRef<HTMLInputElement>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isRecordinggg, setIsRecordinggg] = useState(false);
+  const stopRecordingRef = useRef<(() => void) | null>(null);
 
   function stopRecordingOnSubmit() {
-    setIsRecordinggg(false)
+    if (stopRecordingRef.current) {
+      stopRecordingRef.current();
+    }
   }
 
   return (
@@ -653,6 +656,7 @@ function StudioInner({
                       promptInputRef={modificationInputRef}
                       isRecordinggg={isRecordinggg}
                       setIsRecordinggg={setIsRecordinggg}
+                      onStopRecording={(stopFn: () => void) => { stopRecordingRef.current = stopFn; }}
                     />
                     <button
                       type="submit"
