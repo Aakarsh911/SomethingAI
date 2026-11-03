@@ -1,85 +1,15 @@
-// Package llm runs `llm` workflow steps against the OpenAI Responses API.
 package llm
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
 	"strings"
-	"unicode/utf8"
 )
 
-const defaultBaseURL = "https://api.openai.com/v1"
+// openAI talks to OpenAI's Responses API.
+type openAI struct{ endpoint }
 
-const systemPrompt = "You transform data inside an automation workflow. Follow the instruction exactly and reply with the result only — no preamble, no commentary, no markdown fences."
-
-// maxInputChars caps the previous step's output sent to the model; a Gmail
-// fetch is far larger than a summary needs.
-const maxInputChars = 100_000
-
-type Client struct {
-	apiKey  string
-	baseURL string
-	model   string
-	http    *http.Client
-}
-
-func New(apiKey, baseURL, model string) *Client {
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	return &Client{
-		apiKey:  apiKey,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   model,
-		http:    &http.Client{},
-	}
-}
-
-// Transform applies instruction to input (the previous step's output, as
-// text) and returns the model's reply.
-func (c *Client) Transform(ctx context.Context, instruction, input string) (string, error) {
-	if c.apiKey == "" {
-		return "", errors.New("OPENAI_API_KEY is not set, so model steps cannot run.")
-	}
-
-	payload, err := json.Marshal(map[string]any{
-		"model": c.model,
-		"input": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": "INSTRUCTION\n" + instruction + "\n\nINPUT\n" + renderInput(input)},
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/responses", bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("model step: %w", err)
-	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("model step: read response: %w", err)
-	}
-
+func (p *openAI) Complete(ctx context.Context, system, user string) (string, error) {
 	var body struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
 		Output []struct {
 			Type    string `json:"type"`
 			Content []struct {
@@ -88,14 +18,17 @@ func (c *Client) Transform(ctx context.Context, instruction, input string) (stri
 			} `json:"content"`
 		} `json:"output"`
 	}
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return "", fmt.Errorf("model step: unreadable response (%s)", resp.Status)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		if body.Error != nil && body.Error.Message != "" {
-			return "", fmt.Errorf("model step: %s", body.Error.Message)
-		}
-		return "", fmt.Errorf("model step: OpenAI answered %s", resp.Status)
+	err := p.postJSON(ctx, p.baseURL+"/responses",
+		map[string]string{"Authorization": "Bearer " + p.apiKey},
+		map[string]any{
+			"model": p.model,
+			"input": []map[string]string{
+				{"role": "system", "content": system},
+				{"role": "user", "content": user},
+			},
+		}, &body)
+	if err != nil {
+		return "", err
 	}
 
 	// The SDKs' output_text, by hand: every text part of every message.
@@ -113,16 +46,37 @@ func (c *Client) Transform(ctx context.Context, instruction, input string) (stri
 	return text.String(), nil
 }
 
-func renderInput(text string) string {
-	if text == "" {
-		return "(no input)"
+// openAICompatible talks to any server that speaks the Chat Completions API:
+// OpenRouter, Groq, Together, DeepSeek, vLLM, Ollama and the like.
+type openAICompatible struct{ endpoint }
+
+func (p *openAICompatible) Complete(ctx context.Context, system, user string) (string, error) {
+	headers := map[string]string{}
+	// Local servers often take no key.
+	if p.apiKey != "" {
+		headers["Authorization"] = "Bearer " + p.apiKey
 	}
-	if len(text) > maxInputChars {
-		cut := maxInputChars
-		for cut > 0 && !utf8.RuneStart(text[cut]) {
-			cut--
-		}
-		return text[:cut] + "\n…(truncated)"
+
+	var body struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
-	return text
+	err := p.postJSON(ctx, p.baseURL+"/chat/completions", headers,
+		map[string]any{
+			"model": p.model,
+			"messages": []map[string]string{
+				{"role": "system", "content": system},
+				{"role": "user", "content": user},
+			},
+		}, &body)
+	if err != nil {
+		return "", err
+	}
+	if len(body.Choices) == 0 {
+		return "", nil
+	}
+	return body.Choices[0].Message.Content, nil
 }

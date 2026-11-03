@@ -1,6 +1,5 @@
-import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
+import { LLMError, createLanguageModel, type LanguageModel } from "@/lib/ai/llm";
 import {
   CURRENT_GRAPH_VERSION,
   parseGraph,
@@ -27,14 +26,10 @@ import {
  * that a draft the user confirms is the only honest design. The caller saves.
  */
 
-// Latest general-purpose model at time of writing; override to trade quality
-// for cost and latency, both of which the user feels directly in a chat.
-const MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
-
 /**
  * The model's output shape, deliberately flatter than WorkflowGraph.
  *
- * Structured Outputs runs in strict mode, which forbids the things the graph
+ * Structured output runs in strict mode, which forbids the things the graph
  * schema leans on: defaults, open-ended records, optional keys. Rather than
  * contorting the graph schema to fit, the model emits a linear plan and this
  * module assembles the graph. Tool arguments come back as a JSON *string* for
@@ -457,6 +452,11 @@ function planToGraph(
   return { graph: result.data, droppedArgs };
 }
 
+/** A model error meant for the user becomes a GenerationError; others pass through. */
+function toGenerationError(error: unknown): unknown {
+  return error instanceof LLMError ? new GenerationError(error.message) : error;
+}
+
 export async function generateWorkflowDraft(input: {
   messages: BuilderMessage[];
   tools: AvailableTool[];
@@ -465,9 +465,11 @@ export async function generateWorkflowDraft(input: {
   existing?: ExistingWorkflowContext;
   now?: Date;
 }): Promise<GenerationResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new GenerationError("OPENAI_API_KEY is not set.");
+  let model: LanguageModel;
+  try {
+    model = createLanguageModel();
+  } catch (error) {
+    throw toGenerationError(error);
   }
   if (input.tools.length === 0 && !input.existing) {
     throw new GenerationError(
@@ -479,30 +481,22 @@ export async function generateWorkflowDraft(input: {
   }
 
   const now = input.now ?? new Date();
-  const client = new OpenAI({ apiKey });
-
-  const response = await client.responses.parse({
-    model: MODEL,
-    input: [
-      {
-        role: "system",
-        content: systemPrompt(
-          input.tools,
-          input.timezone,
-          now,
-          input.identity,
-          input.existing,
-        ),
-      },
-      ...input.messages,
-    ],
-    text: { format: zodTextFormat(planSchema, "workflow_plan") },
-  });
-
-  const plan = response.output_parsed;
-  if (!plan) {
-    throw new GenerationError("The model returned no usable plan.");
-  }
+  const plan = await model
+    .generateObject({
+      system: systemPrompt(
+        input.tools,
+        input.timezone,
+        now,
+        input.identity,
+        input.existing,
+      ),
+      messages: input.messages,
+      schema: planSchema,
+      name: "workflow_plan",
+    })
+    .catch((error: unknown) => {
+      throw toGenerationError(error);
+    });
   if (plan.problem) {
     throw new GenerationError(plan.problem);
   }
@@ -520,7 +514,7 @@ export async function generateWorkflowDraft(input: {
     );
   }
 
-  // Strict mode guarantees the shape, not the contents: slugs still have to be
+  // The schema guarantees the shape, not the contents: slugs still have to be
   // checked against the real catalogue, or an invented tool reaches the
   // database and fails at run time instead of here.
   const known = new Set(input.tools.map((tool) => `${tool.serverSlug}:${tool.toolSlug}`));

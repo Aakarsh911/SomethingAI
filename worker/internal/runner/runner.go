@@ -1,4 +1,4 @@
-// Package runner connects the engine to the database, Composio and OpenAI,
+// Package runner connects the engine to the database, Composio and the model provider,
 // and runs three loops:
 //
 //   - schedule: turns due workflows into QUEUED runs.
