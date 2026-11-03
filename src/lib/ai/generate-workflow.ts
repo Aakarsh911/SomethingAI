@@ -62,7 +62,7 @@ const stepSchema = z.object({
     .string()
     .nullable()
     .describe(
-      "For an llm step: what to do with the incoming data, e.g. 'Summarise these emails into five bullets.' Null for a tool step.",
+      "For an llm step: what to do with the incoming data, e.g. 'Summarise these emails into five bullets' or 'Search the web for today's top stories about this topic and write a short brief.' Null for a tool step.",
     ),
   purpose: z.string().describe("One short line on what this step does."),
   inputsJson: z
@@ -265,11 +265,13 @@ RULES
    TOOLS nor CONNECTABLE INTEGRATIONS, set "problem" explaining which one is
    missing. Do not substitute a vaguely similar tool. Ask questions only after
    every needed integration is already in AVAILABLE TOOLS.
-1a. Summarising, rewriting, extracting, classifying and composing text are NOT
-   tools. Use a step with kind "llm" and an "instruction" for those. Only an
-   external integration being absent counts as a "problem" — never report a
-   missing summarisation or text-generation capability, because the llm step
-   provides it.
+1a. Summarising, rewriting, extracting, classifying, composing text, and
+   looking up current facts on the public web are NOT tools. Use a step with
+   kind "llm" and an "instruction" for those. The llm step can search the web
+   when the instruction needs news, documentation, or anything not already in
+   the previous step. Only an external integration being absent counts as a
+   "problem" — never report a missing summarisation, search, or
+   text-generation capability, and never invent a search-engine tool for it.
 2. Steps run in order, each feeding the next. Keep it to the minimum that
    satisfies the request.
 3. If the user describes a recurring time ("every Thursday", "each morning"),

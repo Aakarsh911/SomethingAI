@@ -70,9 +70,10 @@ const triggerNode = z.object({
 /**
  * Transforms the previous step's output with a language model.
  *
- * Summarising, rewriting, extracting and classifying are the glue between
- * tool calls, and none of them is an MCP tool — asking a workflow to
- * "summarise my mail" is unbuildable without this node kind.
+ * Summarising, rewriting, extracting, classifying and looking up current
+ * facts on the public web are the glue between tool calls, and none of them
+ * is an MCP tool — asking a workflow to "summarise my mail" or "search for
+ * today's headlines" is unbuildable without this node kind.
  */
 const llmNode = z.object({
   id: nodeId,
