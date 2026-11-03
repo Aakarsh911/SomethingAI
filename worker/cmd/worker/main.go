@@ -68,17 +68,21 @@ func main() {
 	}
 	defer st.Close()
 
-	model := firstNonEmpty(os.Getenv("OPENAI_STEP_MODEL"), os.Getenv("OPENAI_MODEL"), "gpt-5.5")
+	lc, err := llm.New(llm.ConfigFromEnv(os.Getenv))
+	if err != nil {
+		log.Error("configure model provider", "err", err)
+		os.Exit(1)
+	}
 
 	r := runner.New(
 		cfg,
 		st,
 		composio.New(os.Getenv("COMPOSIO_API_KEY"), os.Getenv("COMPOSIO_BASE_URL")),
-		llm.New(os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), model),
+		lc,
 		log,
 	)
 
-	log.Info("worker started", "concurrency", cfg.Concurrency, "runTimeout", cfg.RunTimeout, "model", model)
+	log.Info("worker started", "concurrency", cfg.Concurrency, "runTimeout", cfg.RunTimeout, "provider", lc.Provider(), "model", lc.Model())
 	r.Run(ctx)
 	log.Info("worker stopped")
 }
@@ -95,13 +99,4 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 		return v
 	}
 	return fallback
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
