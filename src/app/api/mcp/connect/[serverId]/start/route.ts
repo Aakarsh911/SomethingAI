@@ -29,7 +29,16 @@ export async function GET(
   { params }: { params: Promise<{ serverId: string }> },
 ) {
   const requestUrl = new URL(request.url);
-  const integrations = new URL("/settings/integrations", requestUrl.origin);
+  const returnTo = safeReturnTo(requestUrl.searchParams.get("returnTo"));
+  const done = new URL(
+    returnTo ?? "/settings/integrations",
+    requestUrl.origin,
+  );
+
+  const fail = (message: string) => {
+    done.searchParams.set("error", message);
+    return NextResponse.redirect(done);
+  };
 
   const user = await getCurrentUser();
   if (!user) {
@@ -46,16 +55,11 @@ export async function GET(
   });
 
   if (!server) {
-    integrations.searchParams.set("error", "Server not found.");
-    return NextResponse.redirect(integrations);
+    return fail("Server not found.");
   }
 
   if (server.authType !== "COMPOSIO") {
-    integrations.searchParams.set(
-      "error",
-      `${server.name} does not use a hosted authorization flow.`,
-    );
-    return NextResponse.redirect(integrations);
+    return fail(`${server.name} does not use a hosted authorization flow.`);
   }
 
   // Most Composio toolkits authenticate with a key rather than a consent
@@ -63,11 +67,9 @@ export async function GET(
   // already renders a form instead of a link, so reaching here means a stale
   // page or a hand-typed URL.
   if (!usesRedirect(server)) {
-    integrations.searchParams.set(
-      "error",
+    return fail(
       `${server.name} is connected by entering credentials, not by authorizing in a browser.`,
     );
-    return NextResponse.redirect(integrations);
   }
 
   // Opportunistic sweep so abandoned attempts do not accumulate; there is no
@@ -85,7 +87,7 @@ export async function GET(
       state,
       userId: user.id,
       serverId: server.id,
-      returnTo: safeReturnTo(requestUrl.searchParams.get("returnTo")),
+      returnTo,
       expiresAt: new Date(Date.now() + ATTEMPT_TTL_MS),
     },
   });
@@ -110,10 +112,8 @@ export async function GET(
     return NextResponse.redirect(redirectUrl);
   } catch (error) {
     await prisma.mcpConnectAttempt.delete({ where: { id: attempt.id } });
-    integrations.searchParams.set(
-      "error",
+    return fail(
       error instanceof Error ? error.message : "Could not start authorization.",
     );
-    return NextResponse.redirect(integrations);
   }
 }

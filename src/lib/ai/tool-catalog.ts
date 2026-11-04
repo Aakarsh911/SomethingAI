@@ -211,6 +211,37 @@ export async function availableToolsForUser(
   return toolLists.flat();
 }
 
+/**
+ * Integrations the builder may ask the user to connect, as name/slug pairs.
+ *
+ * Not the whole directory (~1500) and not full tool lists: the prompt only
+ * needs enough popular catalog entries to recognise "Gmail" or "Linear"
+ * when they are not already connected. Tools for those arrive on the next
+ * turn, after the user authorizes.
+ */
+export async function connectableCatalogForUser(
+  userId: string,
+): Promise<{ slug: string; name: string }[]> {
+  const [connected, catalog] = await Promise.all([
+    prisma.userMcpConnection.findMany({
+      where: { userId, status: "CONNECTED" },
+      select: { server: { select: { slug: true } } },
+    }),
+    prisma.mcpServer.findMany({
+      where: {
+        isEnabled: true,
+        OR: [{ ownerId: null }, { ownerId: userId }],
+      },
+      select: { slug: true, name: true },
+      orderBy: [{ popularity: "desc" }, { name: "asc" }],
+      take: 400,
+    }),
+  ]);
+
+  const taken = new Set(connected.map((row) => row.server.slug));
+  return catalog.filter((server) => !taken.has(server.slug)).slice(0, 160);
+}
+
 /** Compact rendering for the prompt. One line per tool keeps the list cheap. */
 export function renderToolsForPrompt(tools: AvailableTool[]): string {
   if (tools.length === 0) {

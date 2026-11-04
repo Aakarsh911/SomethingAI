@@ -118,6 +118,29 @@ export async function listServersForUser(
   return servers.map(toView);
 }
 
+/** Lookup by slug for the connect-to-continue panel. Unknown slugs are omitted. */
+export async function getServersBySlugs(
+  userId: string,
+  slugs: string[],
+): Promise<McpServerView[]> {
+  const unique = [...new Set(slugs.map((slug) => slug.trim()).filter(Boolean))];
+  if (unique.length === 0) return [];
+
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      slug: { in: unique },
+      isEnabled: true,
+      OR: [{ ownerId: null }, { ownerId: userId }],
+    },
+    include: { connections: { where: { userId }, select: CONNECTION_FIELDS } },
+  });
+
+  const order = new Map(unique.map((slug, index) => [slug, index]));
+  return servers
+    .map(toView)
+    .sort((a, b) => (order.get(a.slug) ?? 0) - (order.get(b.slug) ?? 0));
+}
+
 /** How many catalog rows match a search, for "showing 20 of 340". */
 export async function countServersForUser(
   userId: string,

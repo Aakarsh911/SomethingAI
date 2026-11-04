@@ -15,7 +15,7 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
-const systemPrompt = "You transform data inside an automation workflow. Follow the instruction exactly and reply with the result only — no preamble, no commentary, no markdown fences."
+const systemPrompt = "You transform data inside an automation workflow. Search the web when the instruction needs current or external facts. Follow the instruction exactly and reply with the result only — no preamble, no commentary, no markdown fences."
 
 // maxInputChars caps the previous step's output sent to the model; a Gmail
 // fetch is far larger than a summary needs.
@@ -49,6 +49,7 @@ func (c *Client) Transform(ctx context.Context, instruction, input string) (stri
 
 	payload, err := json.Marshal(map[string]any{
 		"model": c.model,
+		"tools": []map[string]string{{"type": "web_search"}},
 		"input": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": "INSTRUCTION\n" + instruction + "\n\nINPUT\n" + renderInput(input)},
@@ -80,13 +81,7 @@ func (c *Client) Transform(ctx context.Context, instruction, input string) (stri
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
-		Output []struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"output"`
+		Output []responseItem `json:"output"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return "", fmt.Errorf("model step: unreadable response (%s)", resp.Status)
@@ -99,18 +94,33 @@ func (c *Client) Transform(ctx context.Context, instruction, input string) (stri
 	}
 
 	// The SDKs' output_text, by hand: every text part of every message.
+	// web_search_call items are skipped; the final message carries the answer.
+	return outputText(body.Output), nil
+}
+
+type responsePart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type responseItem struct {
+	Type    string         `json:"type"`
+	Content []responsePart `json:"content"`
+}
+
+func outputText(output []responseItem) string {
 	var text strings.Builder
-	for _, item := range body.Output {
+	for _, item := range output {
 		if item.Type != "message" {
 			continue
 		}
 		for _, part := range item.Content {
-			if part.Type == "output_text" {
+			if part.Type == "output_text" || part.Type == "text" {
 				text.WriteString(part.Text)
 			}
 		}
 	}
-	return text.String(), nil
+	return text.String()
 }
 
 func renderInput(text string) string {

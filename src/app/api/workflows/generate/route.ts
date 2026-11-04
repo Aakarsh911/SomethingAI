@@ -1,8 +1,10 @@
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import {
   availableToolsForUser,
+  connectableCatalogForUser,
   connectedAccountsForUser,
 } from "@/lib/ai/tool-catalog";
+import { hydrateNeededConnections } from "@/lib/mcp/needed";
 import {
   GenerationError,
   generateWorkflowDraft,
@@ -53,21 +55,34 @@ export async function POST(request: Request) {
   const claimed = typeof body.timezone === "string" ? body.timezone : "";
   const timezone = isValidTimezone(claimed) ? claimed : "UTC";
 
-  const [tools, accounts] = await Promise.all([
+  const [tools, accounts, connectable] = await Promise.all([
     availableToolsForUser(user.id),
     connectedAccountsForUser(user.id),
+    connectableCatalogForUser(user.id),
   ]);
 
   try {
     const result = await generateWorkflowDraft({
       messages,
       tools,
+      connectable,
       timezone,
       identity: { email: user.email, accounts },
     });
-    return result.kind === "questions"
-      ? Response.json({ questions: result.questions })
-      : Response.json({ draft: result.draft });
+    if (result.kind === "questions") {
+      return Response.json({ questions: result.questions });
+    }
+    if (result.kind === "connect") {
+      const connections = await hydrateNeededConnections(user.id, result.needs);
+      if (connections.length > 0) {
+        return Response.json({ connections });
+      }
+      return Response.json({
+        error:
+          "This workflow needs an integration that is not in the catalog yet.",
+      }, { status: 422 });
+    }
+    return Response.json({ draft: result.draft });
   } catch (error) {
     // A GenerationError is a message for the user — a missing integration, an
     // unbuildable request — so it is a 422 with the explanation intact.
