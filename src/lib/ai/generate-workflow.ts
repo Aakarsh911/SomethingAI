@@ -550,9 +550,9 @@ export async function generateWorkflowDraft(input: {
   const now = input.now ?? new Date();
   const client = new OpenAI({ apiKey });
 
-  let response: Awaited<ReturnType<typeof client.responses.parse>>;
+  let plan: z.infer<typeof planSchema> | null;
   try {
-    response = await client.responses.parse({
+    const response = await client.responses.parse({
       model: MODEL,
       input: [
         {
@@ -570,11 +570,10 @@ export async function generateWorkflowDraft(input: {
       ],
       text: { format: zodTextFormat(planSchema, "workflow_plan") },
     });
+    plan = response.output_parsed;
   } catch (error) {
     throw mappedProviderError(error);
   }
-
-  const plan = response.output_parsed;
   if (!plan) {
     throw new GenerationError("The model returned no usable plan.");
   }
