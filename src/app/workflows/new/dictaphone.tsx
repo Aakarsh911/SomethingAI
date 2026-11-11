@@ -7,7 +7,8 @@ export function Dictaphone({
   shouldReset,
   onStopRecording,
   isRecordinggg,
-  setIsRecordinggg
+  setIsRecordinggg,
+  promptInputRef
 }: {
   isRecordinggg: boolean;
   setIsRecordinggg: Dispatch<SetStateAction<boolean>>;
@@ -24,14 +25,14 @@ export function Dictaphone({
   const finalTranscriptsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    // reset the partial and final transcript whenever shouldReset prop changes to true 
+    // reset the partial and final transcript whenever shouldReset prop changes to true
     // (usually when speaker submits prompt)
     // resets HTML input element for prompting as well
     if (shouldReset) {
       transcriptRef.current = "";
       finalTranscriptsRef.current = [];
       // Clear the textarea or input
-      const element = document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
+      const element = promptInputRef?.current || document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
       if (element) {
         const isTextarea = element.tagName === 'TEXTAREA';
         const prototype = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
@@ -43,11 +44,11 @@ export function Dictaphone({
         }
       }
     }
-  }, [shouldReset]);
+  }, [shouldReset, promptInputRef]);
 
   const updateTextarea = useCallback((text: string) => {
-    // Find the textarea or input in the component and update it
-    const element = document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
+    // Use the ref if provided, otherwise fall back to querySelector
+    const element = promptInputRef?.current || document.querySelector('textarea[placeholder*="automate"], input[placeholder*="change"]') as HTMLTextAreaElement | HTMLInputElement;
     if (element) {
       const isTextarea = element.tagName === 'TEXTAREA';
       const prototype = isTextarea ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
@@ -58,7 +59,7 @@ export function Dictaphone({
         element.dispatchEvent(event);
       }
     }
-  }, []);
+  }, [promptInputRef]);
 
   // Completely clean up all recording resources
   const stopRecording = useCallback(() => {
@@ -140,9 +141,18 @@ export function Dictaphone({
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
 
+        let chunkCount = 0;
         processor.onaudioprocess = (e) => {
           if (ws.readyState === WebSocket.OPEN) {
             const inputData = e.inputBuffer.getChannelData(0);
+
+            // Check audio level every 50 chunks
+            chunkCount++;
+            if (chunkCount % 50 === 0) {
+              const maxVolume = Math.max(...Array.from(inputData).map(Math.abs));
+              console.log('Audio level:', maxVolume.toFixed(3), 'chunks sent:', chunkCount);
+            }
+
             // Convert float32 to int16
             const int16Data = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {
@@ -162,15 +172,15 @@ export function Dictaphone({
           const msg = JSON.parse(event.data);
 
           if (msg.type === 'partial_utterance') {
-            // Update display with partial + all finals
             const partial = msg.partial_utterance.text;
+            if (partial) console.log('Transcription:', partial);
             const allText = [...finalTranscriptsRef.current, partial].join(' ');
             transcriptRef.current = allText;
             updateTextarea(allText);
           } else if (msg.type === 'utterance') {
-            // Add final utterance to our list
             const finalText = msg.utterance.text;
             if (finalText.trim()) {
+              console.log('Final:', finalText);
               finalTranscriptsRef.current.push(finalText);
               const allText = finalTranscriptsRef.current.join(' ');
               transcriptRef.current = allText;
