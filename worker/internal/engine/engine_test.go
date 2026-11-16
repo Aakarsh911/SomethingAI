@@ -224,10 +224,10 @@ func TestFailures(t *testing.T) {
 			want: `loops back to "a"`,
 		},
 		{
-			name: "parallel",
-			graph: `{"nodes":[{"id":"t","kind":"trigger"},{"id":"a","kind":"tool","serverSlug":"s","toolSlug":"A"},{"id":"b","kind":"tool","serverSlug":"s","toolSlug":"B"}],
-				"edges":[{"from":"t","to":"a"},{"from":"t","to":"b"}]}`,
-			want: "Parallel branches are not supported yet",
+			name: "join",
+			graph: `{"nodes":[{"id":"t","kind":"trigger"},{"id":"a","kind":"tool","serverSlug":"s","toolSlug":"A"},{"id":"b","kind":"tool","serverSlug":"s","toolSlug":"B"},{"id":"c","kind":"tool","serverSlug":"s","toolSlug":"C"}],
+				"edges":[{"from":"t","to":"a"},{"from":"t","to":"b"},{"from":"a","to":"c"},{"from":"b","to":"c"}]}`,
+			want: `"c" is reached by more than one path`,
 		},
 		{
 			name: "unconfigured",
@@ -298,5 +298,168 @@ func TestStepLimit(t *testing.T) {
 	result := Execute(context.Background(), g, env)
 	if !strings.Contains(result.Error, "1-step limit") {
 		t.Fatalf("error = %q", result.Error)
+	}
+}
+
+func TestParallelPathsStartFromTheSameStep(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "fetch", "kind": "tool", "serverSlug": "gmail", "toolSlug": "FETCH"},
+			{"id": "mail", "kind": "tool", "serverSlug": "gmail", "toolSlug": "SEND", "inputs": {"body": "{{previous.output}}"}},
+			{"id": "after_mail", "kind": "tool", "serverSlug": "s", "toolSlug": "AFTER", "inputs": {"in": "{{previous.output}}"}},
+			{"id": "event", "kind": "tool", "serverSlug": "calendar", "toolSlug": "CREATE", "inputs": {"title": "{{previous.output}}", "from": "{{steps.fetch.output}}"}}
+		],
+		"edges": [
+			{"from": "t", "to": "fetch"},
+			{"from": "fetch", "to": "mail"},
+			{"from": "fetch", "to": "event"},
+			{"from": "mail", "to": "after_mail"}
+		]
+	}`)
+
+	r := &recorder{}
+	result := Execute(context.Background(), g, r.env(func(call ToolCall) (any, error) {
+		return "out of " + call.ToolSlug, nil
+	}))
+
+	if result.Status != RunSucceeded {
+		t.Fatalf("status = %s, error = %q", result.Status, result.Error)
+	}
+	var order []string
+	for _, call := range r.tools {
+		order = append(order, call.ToolSlug)
+	}
+	// Depth first, in edge order: the mail path finishes before the event path.
+	if want := []string{"FETCH", "SEND", "AFTER", "CREATE"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	if got := r.tools[2].Inputs["in"]; got != "out of SEND" {
+		t.Errorf("after_mail read %#v", got)
+	}
+	// The event follows fetch, so previous is fetch's output, not the mail path's.
+	if got := r.tools[3].Inputs["title"]; got != "out of FETCH" {
+		t.Errorf("event title = %#v, want fetch's output", got)
+	}
+	if got := r.tools[3].Inputs["from"]; got != "out of FETCH" {
+		t.Errorf("event from = %#v", got)
+	}
+	if result.Output != "out of CREATE" {
+		t.Errorf("output = %#v", result.Output)
+	}
+}
+
+func TestSiblingPathOutputIsNotVisible(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "a", "kind": "tool", "serverSlug": "s", "toolSlug": "A"},
+			{"id": "b", "kind": "tool", "serverSlug": "s", "toolSlug": "B", "inputs": {"x": "{{steps.a.output}}"}}
+		],
+		"edges": [{"from": "t", "to": "a"}, {"from": "t", "to": "b"}]
+	}`)
+
+	r := &recorder{}
+	result := Execute(context.Background(), g, r.env(func(ToolCall) (any, error) { return "ok", nil }))
+	// a ran first, but b is not downstream of it, so the reference must not
+	// resolve depending on run order.
+	if result.Status != RunFailed || !strings.Contains(result.Error, "which has not run") {
+		t.Fatalf("got %s %q", result.Status, result.Error)
+	}
+}
+
+func TestFailedPathDoesNotStopItsSibling(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "boom", "kind": "tool", "serverSlug": "s", "toolSlug": "BOOM"},
+			{"id": "below", "kind": "tool", "serverSlug": "s", "toolSlug": "BELOW"},
+			{"id": "fine", "kind": "tool", "serverSlug": "s", "toolSlug": "FINE"}
+		],
+		"edges": [
+			{"from": "t", "to": "boom"},
+			{"from": "boom", "to": "below"},
+			{"from": "t", "to": "fine"}
+		]
+	}`)
+
+	r := &recorder{}
+	result := Execute(context.Background(), g, r.env(func(call ToolCall) (any, error) {
+		if call.ToolSlug == "BOOM" {
+			return nil, errors.New("kaboom")
+		}
+		return "ok", nil
+	}))
+
+	if result.Status != RunFailed || result.Error != "kaboom" {
+		t.Fatalf("got %s %q", result.Status, result.Error)
+	}
+	var called []string
+	for _, call := range r.tools {
+		called = append(called, call.ToolSlug)
+	}
+	if want := []string{"BOOM", "FINE"}; !reflect.DeepEqual(called, want) {
+		t.Fatalf("called %v, want %v", called, want)
+	}
+	if result.Output != "ok" {
+		t.Errorf("output = %#v", result.Output)
+	}
+}
+
+func TestEveryFailedPathIsCounted(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "a", "kind": "tool", "serverSlug": "s", "toolSlug": "BOOM"},
+			{"id": "b", "kind": "tool", "serverSlug": "s", "toolSlug": "BOOM"}
+		],
+		"edges": [{"from": "t", "to": "a"}, {"from": "t", "to": "b"}]
+	}`)
+
+	r := &recorder{}
+	result := Execute(context.Background(), g, r.env(func(ToolCall) (any, error) {
+		return nil, errors.New("kaboom")
+	}))
+	if result.Status != RunFailed || result.Error != "kaboom (2 paths failed in total.)" {
+		t.Fatalf("got %s %q", result.Status, result.Error)
+	}
+	if len(r.steps) != 2 {
+		t.Errorf("recorded %d steps, want 2", len(r.steps))
+	}
+}
+
+func TestBranchCanFanOutAndRejoinsAfterExclusivePaths(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "b", "kind": "branch", "condition": "true"},
+			{"id": "yes", "kind": "tool", "serverSlug": "s", "toolSlug": "YES"},
+			{"id": "also", "kind": "tool", "serverSlug": "s", "toolSlug": "ALSO"},
+			{"id": "no", "kind": "tool", "serverSlug": "s", "toolSlug": "NO"},
+			{"id": "end", "kind": "tool", "serverSlug": "s", "toolSlug": "END"}
+		],
+		"edges": [
+			{"from": "t", "to": "b"},
+			{"from": "b", "to": "yes", "when": "true"},
+			{"from": "b", "to": "yes", "when": "always"},
+			{"from": "b", "to": "also", "when": "always"},
+			{"from": "b", "to": "no", "when": "false"},
+			{"from": "yes", "to": "end"},
+			{"from": "no", "to": "end"}
+		]
+	}`)
+
+	r := &recorder{}
+	result := Execute(context.Background(), g, r.env(func(ToolCall) (any, error) { return "ok", nil }))
+	if result.Status != RunSucceeded {
+		t.Fatalf("status = %s, error = %q", result.Status, result.Error)
+	}
+	var called []string
+	for _, call := range r.tools {
+		called = append(called, call.ToolSlug)
+	}
+	// "end" has two parents, but only one of them can run, so it is not a join.
+	if want := []string{"YES", "END", "ALSO"}; !reflect.DeepEqual(called, want) {
+		t.Fatalf("called %v, want %v", called, want)
 	}
 }

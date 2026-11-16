@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"somethingai/worker/internal/graph"
@@ -78,8 +79,17 @@ const DefaultMaxSteps = 50
 // ErrRunTimedOut is the message recorded when the run's context expires.
 const ErrRunTimedOut = "This run ran out of time before it finished."
 
-// Execute runs g to completion or the first failure. ctx's deadline caps the
-// whole run and also cancels the step in flight.
+// Execute runs every path out of the trigger. A node with several outgoing
+// edges starts each of them from its own output, one after another rather
+// than at once: depth first, in edge order, so the run log reads one path at
+// a time.
+//
+// A failed step stops only its own path. Its siblings still run, because one
+// dead server should fail one node, not the run; the run is still FAILED.
+// Anything that breaks the run as a whole (the deadline, the step limit, a
+// loop, two paths merging) stops it at once.
+//
+// ctx's deadline caps the whole run and also cancels the step in flight.
 func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 	now := env.Now
 	if now == nil {
@@ -108,21 +118,33 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 		}
 	}
 
-	// Steps is keyed by node id, for {{steps.<id>.output}}.
-	scope := Scope{Previous: nil, Steps: map[string]any{}}
+	// Output of the last step that produced one, across all paths.
+	var last any
+	// Failures of individual paths, which do not stop the others.
+	var failures []string
 
 	fail := func(message string) Result {
-		return Result{Status: RunFailed, Steps: steps, Error: message, Output: scope.Previous}
+		return Result{Status: RunFailed, Steps: steps, Error: message, Output: last}
 	}
 
-	visited := map[string]bool{}
-	current := trigger
+	// A path is the node to run next and the steps that led to it. The scope
+	// is per path: a step reads its own ancestors' outputs, never a sibling
+	// path's, so what it sees does not depend on which path happened to run
+	// first.
+	type path struct {
+		node  *graph.Node
+		scope Scope
+		// Ancestors, trigger first, to tell a loop from two paths merging.
+		trail []string
+	}
 
-	for current != nil {
-		if visited[current.ID] {
-			return fail(fmt.Sprintf("This workflow loops back to %q. Runs must not revisit a step.", current.ID))
-		}
-		visited[current.ID] = true
+	reached := map[string]bool{trigger.ID: true}
+	stack := []path{{node: trigger, scope: Scope{Previous: nil, Steps: map[string]any{}}}}
+
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		node, scope := current.node, current.scope
 
 		if len(steps) >= maxSteps {
 			return fail(fmt.Sprintf("This workflow exceeded the %d-step limit for one run.", maxSteps))
@@ -132,38 +154,66 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 		}
 
 		// The trigger is an entry point, not work, so it is not a step.
-		if current.Kind != graph.KindTrigger {
-			outcome := runNode(ctx, current, env, now, scope)
+		if node.Kind != graph.KindTrigger {
+			outcome := runNode(ctx, node, env, now, scope)
 			steps = append(steps, outcome)
 			if env.OnStep != nil {
 				if err := env.OnStep(outcome); err != nil {
-					return fail(fmt.Sprintf("Could not record step %q: %v", current.ID, err))
+					return fail(fmt.Sprintf("Could not record step %q: %v", node.ID, err))
 				}
 			}
 
 			if outcome.Status == StepFailed {
-				if outcome.Error == "" {
-					return fail(fmt.Sprintf("Step %q failed.", current.ID))
+				message := outcome.Error
+				if message == "" {
+					message = fmt.Sprintf("Step %q failed.", node.ID)
 				}
-				return fail(outcome.Error)
+				if ctx.Err() != nil {
+					return fail(message)
+				}
+				failures = append(failures, message)
+				continue
 			}
 
 			// A branch routes rather than transforms, so its empty output must
 			// not replace Previous, which its own condition reads next.
-			if current.Kind != graph.KindBranch {
-				scope.Steps[current.ID] = outcome.Output
-				scope.Previous = outcome.Output
+			if node.Kind != graph.KindBranch {
+				scope = scope.with(node.ID, outcome.Output)
+				last = outcome.Output
 			}
 		}
 
-		next, err := chooseNext(current, g, byID, scope)
+		next, err := chooseNext(node, g, byID, scope)
 		if err != nil {
-			return fail(err.Error())
+			failures = append(failures, err.Error())
+			continue
 		}
-		current = next
+
+		trail := append(current.trail[:len(current.trail):len(current.trail)], node.ID)
+		// Pushed in reverse so the first edge runs first.
+		for i := len(next) - 1; i >= 0; i-- {
+			child := next[i]
+			if reached[child.ID] {
+				if slices.Contains(trail, child.ID) {
+					return fail(fmt.Sprintf("This workflow loops back to %q. Runs must not revisit a step.", child.ID))
+				}
+				// Waiting for every parent, or running once per parent, are
+				// both plausible; until one is chosen, refuse rather than guess.
+				return fail(fmt.Sprintf("Step %q is reached by more than one path. Paths that split cannot join again yet.", child.ID))
+			}
+			reached[child.ID] = true
+			stack = append(stack, path{node: child, scope: scope, trail: trail})
+		}
 	}
 
-	return Result{Status: RunSucceeded, Steps: steps, Output: scope.Previous}
+	if len(failures) > 0 {
+		message := failures[0]
+		if len(failures) > 1 {
+			message = fmt.Sprintf("%s (%d paths failed in total.)", message, len(failures))
+		}
+		return fail(message)
+	}
+	return Result{Status: RunSucceeded, Steps: steps, Output: last}
 }
 
 func runNode(ctx context.Context, node *graph.Node, env Env, now func() time.Time, scope Scope) StepOutcome {
@@ -235,20 +285,18 @@ func runNode(ctx context.Context, node *graph.Node, env Env, now func() time.Tim
 	return settle(StepSucceeded, inputs, output, "")
 }
 
-func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node, scope Scope) (*graph.Node, error) {
+// chooseNext returns every node to run after current, in edge order.
+func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node, scope Scope) ([]*graph.Node, error) {
 	var outgoing []graph.Edge
 	for _, edge := range g.Edges {
 		if edge.From == current.ID {
 			outgoing = append(outgoing, edge)
 		}
 	}
-	if len(outgoing) == 0 {
-		return nil, nil
-	}
 
 	eligible := outgoing
 
-	if current.Kind == graph.KindBranch {
+	if current.Kind == graph.KindBranch && len(outgoing) > 0 {
 		taken, err := EvaluateCondition(current.Condition, scope)
 		if err != nil {
 			return nil, err
@@ -264,21 +312,24 @@ func chooseNext(current *graph.Node, g *graph.Graph, byID map[string]*graph.Node
 				eligible = append(eligible, edge)
 			}
 		}
-		if len(eligible) == 0 {
-			return nil, nil
+	}
+
+	var next []*graph.Node
+	seen := map[string]bool{}
+	for _, edge := range eligible {
+		// Two edges to one child, e.g. "true" and "always" out of a branch,
+		// still run it once.
+		if seen[edge.To] {
+			continue
 		}
+		seen[edge.To] = true
+		node, ok := byID[edge.To]
+		if !ok {
+			return nil, fmt.Errorf("Edge points at unknown step %q.", edge.To)
+		}
+		next = append(next, node)
 	}
-
-	if len(eligible) > 1 {
-		// Picking one would be silently wrong; running both needs a merge rule.
-		return nil, fmt.Errorf("Step %q has %d outgoing paths. Parallel branches are not supported yet.", current.ID, len(eligible))
-	}
-
-	node, ok := byID[eligible[0].To]
-	if !ok {
-		return nil, fmt.Errorf("Edge points at unknown step %q.", eligible[0].To)
-	}
-	return node, nil
+	return next, nil
 }
 
 // describe turns a step error into its recorded message, reporting a run

@@ -67,11 +67,11 @@ export async function POST(
       { status: 422 },
     );
   }
-  if (!isLinearGraph(parsed.data)) {
+  if (!isEditableGraph(parsed.data)) {
     return Response.json(
       {
         error:
-          "Text editing currently supports linear workflows, not branches or disconnected nodes.",
+          "Text editing does not support condition branches, steps that merge, or disconnected nodes yet.",
       },
       { status: 422 },
     );
@@ -188,7 +188,13 @@ function readMessages(value: unknown): BuilderMessage[] | null {
   return messages.length > 0 ? messages : null;
 }
 
-function isLinearGraph(graph: WorkflowGraph): boolean {
+/**
+ * Whether the generator can rewrite this graph without losing anything: a
+ * tree of tool and llm steps under the trigger. Paths may split, but every
+ * step has one parent, since a plan step names exactly one step it follows.
+ * Branch nodes are out because a plan cannot express them.
+ */
+function isEditableGraph(graph: WorkflowGraph): boolean {
   const trigger = graph.nodes.find((node) => node.kind === "trigger");
   if (!trigger) return false;
   if (graph.nodes.some((node) => node.kind === "branch")) return false;
@@ -203,19 +209,21 @@ function isLinearGraph(graph: WorkflowGraph): boolean {
   if ((incoming.get(trigger.id) ?? 0) !== 0) return false;
   if (
     graph.nodes.some(
-      (node) =>
-        (outgoing.get(node.id)?.length ?? 0) > 1 ||
-        (node.id !== trigger.id && (incoming.get(node.id) ?? 0) !== 1),
+      (node) => node.id !== trigger.id && (incoming.get(node.id) ?? 0) !== 1,
     )
   ) {
     return false;
   }
 
+  // One parent each and n - 1 edges still allows a cycle cut off from the
+  // trigger, so check that everything is actually reachable.
   const visited = new Set<string>();
-  let current: string | undefined = trigger.id;
-  while (current && !visited.has(current)) {
-    visited.add(current);
-    current = outgoing.get(current)?.[0];
+  const pending = [trigger.id];
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    pending.push(...(outgoing.get(id) ?? []));
   }
   return visited.size === graph.nodes.length;
 }

@@ -36,8 +36,8 @@ const MODEL = process.env.OPENAI_MODEL ?? "gpt-5.5";
  *
  * Structured Outputs runs in strict mode, which forbids the things the graph
  * schema leans on: defaults, open-ended records, optional keys. Rather than
- * contorting the graph schema to fit, the model emits a linear plan and this
- * module assembles the graph. Tool arguments come back as a JSON *string* for
+ * contorting the graph schema to fit, the model emits a flat list of steps,
+ * each naming the step it follows, and this module assembles the graph. Tool arguments come back as a JSON *string* for
  * the same reason — strict mode has no way to express an arbitrary object.
  */
 const stepSchema = z.object({
@@ -64,10 +64,17 @@ const stepSchema = z.object({
     .describe(
       "For an llm step: what to do with the incoming data, e.g. 'Summarise these emails into five bullets.' Null for a tool step.",
     ),
+  after: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      "Index in this steps array (0-based) of the earlier step whose output this step works on. Usually the step just before it. Two steps that each act on the same result share the same value. Null only when the step starts straight from the trigger.",
+    ),
   purpose: z.string().describe("One short line on what this step does."),
   inputsJson: z
     .string()
-    .describe('Tool arguments as a JSON object string, e.g. {"query":"is:unread"}. Use {} if none or for an llm step.'),
+    .describe('Tool arguments as a JSON object string, e.g. {"query":"is:unread"} or {"body":"{{previous.output}}"}. Use {} if none or for an llm step.'),
 });
 
 /**
@@ -139,6 +146,8 @@ export type WorkflowDraft = {
     serverSlug: string | null;
     toolSlug: string | null;
     purpose: string;
+    /** Index of the step this one follows; null when it follows the trigger. */
+    after: number | null;
   }[];
 };
 
@@ -186,9 +195,10 @@ parts they did not ask to change.
 CURRENT WORKFLOW
 ${JSON.stringify(existing, null, 2)}
 
-The current graph is linear. Preserve its order unless the user asks to reorder
-it. A request such as "add a final summary step" means keep all current steps
-and append that step; it does not mean build a new workflow from scratch.`
+Its edges say which step follows which. Preserve that shape unless the user
+asks to change it: a step keeps following the same step it follows now. A
+request such as "add a final summary step" means keep all current steps and
+append that step; it does not mean build a new workflow from scratch.`
     : `CREATE MODE
 Build a complete new workflow from the conversation.`;
 
@@ -216,8 +226,31 @@ RULES
    external integration being absent counts as a "problem" — never report a
    missing summarisation or text-generation capability, because the llm step
    provides it.
-2. Steps run in order, each feeding the next. Keep it to the minimum that
+2. Each step works on the output of the step named in its "after", usually
+   the one just before it. When the request asks for several independent
+   actions on the same result — "email it AND add it to my calendar" — give
+   each of them that result's step as "after" instead of chaining one behind
+   the other. A step may only follow an EARLIER step, and two paths that split
+   must never merge back into one step. Keep it to the minimum that
    satisfies the request.
+2a. An argument or instruction that needs an earlier step's result uses a
+   reference, never a description of one:
+     {{previous.output}}  the result of the step named in "after"
+     {{steps.N.output}}   the result of step N, numbered like "after" (0-based)
+   Step N must be upstream of the step using it: its "after", or that step's
+   "after", and so on back to the trigger. A step on another path has not run
+   yet, so it cannot be referenced.
+   Writing "Use the sender from the fetched email" into an argument is the
+   failure this rule exists to prevent: the tool receives that sentence
+   literally, and a send step mails it to someone.
+2b. You do not know the shape of a tool's result, so never guess a field path
+   into it such as {{steps.0.output.messages.0.sender}}. When an argument needs
+   one value out of a result — an address, a subject, an id — add an llm step
+   that extracts exactly that value and replies with nothing else, and
+   reference its output. Its instruction names its source with a reference,
+   e.g. "Reply with only the sender's email address of this email:
+   {{steps.0.output}}". Chain extraction steps one after another so a later
+   step can still reference all of them.
 3. If the user describes a recurring time ("every Thursday", "each morning"),
    set trigger to SCHEDULE, write a five-field cron, and set timezone to
    ${timezone} unless they name a different one. The cron is read in that
@@ -267,7 +300,9 @@ RULES
    broad query silently drops the very items the workflow exists to find: it
    returns the most recent N of everything, and the match may not be in them.
    A wide query with no limit is refused outright for being too large. Narrow
-   first, then cap.`;
+   first, then cap.
+17. In EDIT MODE, references in kept steps may name current node ids, e.g.
+   {{steps.step-1.output}}. Keep those, and use step numbers for new ones.`;
 }
 
 /** Who the workflow is being built for, so the model need not ask the obvious. */
@@ -289,7 +324,46 @@ function renderAccountsForPrompt(accounts: Identity["accounts"]): string {
   return `- Connected accounts:\n${lines.join("\n")}`;
 }
 
-/** Assembles a linear graph from the model's plan. */
+/**
+ * Lays a plan out as a tree: one column per depth, and a new row for every
+ * path that splits off, so sibling steps do not open stacked on one another.
+ */
+function layoutPlan(parents: (number | null)[]) {
+  const children = new Map<number | null, number[]>();
+  parents.forEach((parent, index) => {
+    children.set(parent, [...(children.get(parent) ?? []), index]);
+  });
+
+  const cells: { column: number; row: number }[] = [];
+  let rows = 0;
+  const place = (index: number, column: number, row: number) => {
+    cells[index] = { column, row };
+    (children.get(index) ?? []).forEach((child, i) => {
+      place(child, column + 1, i === 0 ? row : ++rows);
+    });
+  };
+  (children.get(null) ?? []).forEach((root, i) => {
+    place(root, 1, i === 0 ? 0 : ++rows);
+  });
+  return cells;
+}
+
+/** Matches the step part of `{{steps.<ref>.…}}`, the only cross-step reference. */
+const STEP_REFERENCE = /(\{\{\s*steps\.)([^.{}\s]+)/g;
+
+/** Every string inside an argument template, for rewriting or checking. */
+function mapStrings(value: unknown, fn: (text: string) => string): unknown {
+  if (typeof value === "string") return fn(value);
+  if (Array.isArray(value)) return value.map((entry) => mapStrings(entry, fn));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, mapStrings(entry, fn)]),
+    );
+  }
+  return value;
+}
+
+/** Assembles the graph from the model's plan. */
 function planToGraph(
   plan: z.infer<typeof planSchema>,
   tools: AvailableTool[],
@@ -303,9 +377,24 @@ function planToGraph(
   // canvas positions nodes from these coordinates, and a generated workflow
   // would otherwise open as a single stack of overlapping cards.
   const LANE_Y = 180;
+  const LANE_GAP = 160;
   const COLUMN_X = 80;
   const COLUMN_GAP = 260;
-  const at = (index: number) => ({ x: COLUMN_X + index * COLUMN_GAP, y: LANE_Y });
+  const at = (column: number, row = 0) => ({
+    x: COLUMN_X + column * COLUMN_GAP,
+    y: LANE_Y + row * LANE_GAP,
+  });
+
+  // Every step must follow an earlier one. That alone rules out loops and
+  // merges: each step has exactly one parent, and parents come first.
+  plan.steps.forEach((step, index) => {
+    if (step.after !== null && (step.after < 0 || step.after >= index)) {
+      throw new GenerationError(
+        `The model made step ${index + 1} follow step ${step.after + 1}, which does not come before it.`,
+      );
+    }
+  });
+  const cells = layoutPlan(plan.steps.map((step) => step.after));
 
   const oldTrigger = existing?.nodes.find((node) => node.kind === "trigger");
   const triggerId = oldTrigger?.id ?? "trigger";
@@ -381,18 +470,44 @@ function planToGraph(
       .map((node) => `${node.position.x}:${node.position.y}`),
   );
   const freshPosition = (index: number) => {
-    const candidate = at(index + 1);
+    const candidate = at(cells[index].column, cells[index].row);
     while (usedPositions.has(`${candidate.x}:${candidate.y}`)) {
-      candidate.y += 160;
+      candidate.y += LANE_GAP;
     }
     usedPositions.add(`${candidate.x}:${candidate.y}`);
     return candidate;
   };
 
-  let previous = triggerId;
+  const ids: string[] = [];
+
+  // The model numbers steps because it cannot know the ids they will get.
+  // Rewritten to ids here, and checked, because the engine only lets a step
+  // read its own ancestors: a reference to a sibling or a later step would
+  // save cleanly and then fail every run with "has not run".
+  const ancestors = (index: number) => {
+    const upstream = new Set<string>();
+    for (let at = plan.steps[index].after; at !== null; at = plan.steps[at].after) {
+      upstream.add(ids[at]);
+    }
+    return upstream;
+  };
+  const resolveReferences = (index: number, text: string) => {
+    const upstream = ancestors(index);
+    return text.replace(STEP_REFERENCE, (match, head: string, ref: string) => {
+      const id = /^\d+$/.test(ref) ? ids[Number(ref)] : ref;
+      if (id === undefined || !upstream.has(id)) {
+        throw new GenerationError(
+          `Step ${index + 1} reads "${match}…}}", which is not a step before it on the same path.`,
+        );
+      }
+      return `${head}${id}`;
+    });
+  };
+
   plan.steps.forEach((step, index) => {
     const oldNode = matches.get(index);
     const id = oldNode?.id ?? freshId(index);
+    ids.push(id);
     const label = step.purpose.slice(0, 200);
     const position = oldNode?.position ?? freshPosition(index);
 
@@ -402,7 +517,7 @@ function planToGraph(
         kind: "llm",
         label,
         position,
-        instruction: step.instruction ?? step.purpose,
+        instruction: resolveReferences(index, step.instruction ?? step.purpose),
       });
     } else {
       // A model that ignores the "JSON object string" instruction should not
@@ -416,6 +531,10 @@ function planToGraph(
       } catch {
         inputs = {};
       }
+      inputs = mapStrings(inputs, (text) => resolveReferences(index, text)) as Record<
+        string,
+        unknown
+      >;
 
       // The model names arguments from memory, so reconcile against the
       // tool's real input schema before the graph is built.
@@ -442,8 +561,11 @@ function planToGraph(
       });
     }
 
-    edges.push({ from: previous, to: id, when: "always" });
-    previous = id;
+    edges.push({
+      from: step.after === null ? triggerId : ids[step.after],
+      to: id,
+      when: "always",
+    });
   });
 
   const result = parseGraph({ nodes, edges });
@@ -570,6 +692,7 @@ export async function generateWorkflowDraft(input: {
         serverSlug: step.serverSlug,
         toolSlug: step.toolSlug,
         purpose: step.purpose,
+        after: step.after,
       })),
     },
   };
