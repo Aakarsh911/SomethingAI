@@ -55,6 +55,9 @@ func main() {
 		StepTimeout:      60 * time.Second,
 		RunTimeout:       envDuration("WORKER_RUN_TIMEOUT", 15*time.Minute),
 		ReapGrace:        2 * time.Minute,
+		// Arbitrary: enough for a long summarization chain, not enough for a
+		// runaway loop to rack up an unbounded bill. Override via env if needed.
+		MaxTokensPerRun: envInt("WORKER_MAX_TOKENS_PER_RUN", 20_000),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -34,6 +34,10 @@ type Config struct {
 	// RunTimeout caps a whole run; one older than this plus ReapGrace is dead.
 	RunTimeout time.Duration
 	ReapGrace  time.Duration
+	// MaxTokensPerRun stops a run once its model steps have billed this many
+	// tokens in total, so a chatty prompt (or one stuck looping) cannot run
+	// up an unbounded OpenAI bill. Zero or negative means no limit.
+	MaxTokensPerRun int
 }
 
 type Runner struct {
@@ -267,6 +271,10 @@ func (r *Runner) liveEnv(ctx context.Context, userID string) (engine.Env, error)
 		return engine.Env{}, err
 	}
 
+	// Tracked per run: liveEnv is called once per claimed run, so this closes
+	// over a fresh counter every time and steps run sequentially within it.
+	var tokensUsed int
+
 	return engine.Env{
 		CallTool: func(ctx context.Context, call engine.ToolCall) (any, error) {
 			account, connected := accounts[call.ServerSlug]
@@ -283,9 +291,20 @@ func (r *Runner) liveEnv(ctx context.Context, userID string) (engine.Env, error)
 			})
 		},
 		CallModel: func(ctx context.Context, call engine.ModelCall) (string, error) {
+			if r.cfg.MaxTokensPerRun > 0 && tokensUsed >= r.cfg.MaxTokensPerRun {
+				return "", fmt.Errorf(
+					"this run has used %d tokens, over the %d-token limit per run, so it was stopped before running another model step",
+					tokensUsed, r.cfg.MaxTokensPerRun,
+				)
+			}
+
+			var tokens int
 			out, err := r.withStepTimeout(ctx, "the model step", func(ctx context.Context) (any, error) {
-				return r.llm.Transform(ctx, call.Instruction, engine.Stringify(call.Input))
+				text, n, err := r.llm.Transform(ctx, call.Instruction, engine.Stringify(call.Input))
+				tokens = n
+				return text, err
 			})
+			tokensUsed += tokens
 			if err != nil {
 				return "", err
 			}
