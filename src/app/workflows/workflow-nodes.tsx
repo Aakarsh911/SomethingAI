@@ -95,7 +95,7 @@ export function LlmNode({ data }: NodeProps<FlowNode>) {
         position={Position.Left}
         className="!h-2.5 !w-2.5 !border-2 !border-card !bg-g-yellow"
       />
-      <Badge icon={Bot} label="Model" className="text-[color:var(--warn)]" />
+      <Badge icon={Bot} label="Model · web" className="text-[color:var(--warn)]" />
       <p className="mt-1 text-sm font-medium text-foreground">{data.label}</p>
       {data.instruction ? (
         <p className="mt-1 max-w-[240px] text-xs leading-relaxed text-muted-foreground">

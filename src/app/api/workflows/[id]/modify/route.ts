@@ -1,8 +1,10 @@
 import { getCurrentUser, unauthorized } from "@/lib/auth";
 import {
   availableToolsForUser,
+  connectableCatalogForUser,
   connectedAccountsForUser,
 } from "@/lib/ai/tool-catalog";
+import { hydrateNeededConnections } from "@/lib/mcp/needed";
 import {
   GenerationError,
   generateWorkflowDraft,
@@ -89,15 +91,17 @@ export async function POST(
   const claimed =
     typeof body.timezone === "string" ? body.timezone.trim() : "";
   const timezone = isValidTimezone(claimed) ? claimed : "UTC";
-  const [tools, accounts] = await Promise.all([
+  const [tools, accounts, connectable] = await Promise.all([
     availableToolsForUser(user.id),
     connectedAccountsForUser(user.id),
+    connectableCatalogForUser(user.id),
   ]);
 
   try {
     const result = await generateWorkflowDraft({
       messages,
       tools,
+      connectable,
       timezone,
       identity: { email: user.email, accounts },
       existing: {
@@ -113,6 +117,19 @@ export async function POST(
 
     if (result.kind === "questions") {
       return Response.json({ questions: result.questions });
+    }
+    if (result.kind === "connect") {
+      const connections = await hydrateNeededConnections(user.id, result.needs);
+      if (connections.length > 0) {
+        return Response.json({ connections });
+      }
+      return Response.json(
+        {
+          error:
+            "This change needs an integration that is not in the catalog yet.",
+        },
+        { status: 422 },
+      );
     }
 
     const latestInstruction =

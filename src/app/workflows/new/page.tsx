@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import FlowField from "@/components/kokonutui/flow-field";
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
 import { WorkflowChat } from "./workflow-chat";
 
 export const dynamic = "force-dynamic";
@@ -15,10 +14,6 @@ export const metadata = {
 export default async function NewWorkflowPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
-
-  const connections = await prisma.userMcpConnection.count({
-    where: { userId: user.id, status: "CONNECTED" },
-  });
 
   return (
     <div className="relative h-full overflow-hidden bg-canvas">
@@ -32,6 +27,7 @@ export default async function NewWorkflowPage() {
         className="text-g-blue/35 dark:text-g-blue/30"
         density={0.7}
         speed={0.7}
+        interactive={false}
       />
 
       <div className="relative z-10 flex h-full flex-col">
@@ -45,7 +41,7 @@ export default async function NewWorkflowPage() {
           </Link>
         </header>
 
-        <WorkflowChat hasConnections={connections > 0} />
+        <WorkflowChat />
       </div>
     </div>
   );

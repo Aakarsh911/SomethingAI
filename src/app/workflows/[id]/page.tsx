@@ -1,7 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { hydrateNeededConnections } from "@/lib/mcp/needed";
 import { listServersForUser } from "@/lib/mcp/servers";
-import { parseGraph } from "@/lib/workflows/graph";
+import { parseGraph, toolServerSlugs } from "@/lib/workflows/graph";
 import { scheduleView } from "@/lib/workflows/schedule";
 import {
   getWorkflow,
@@ -40,6 +41,19 @@ export default async function WorkflowPage({
     throw new Error("Stored workflow graph failed validation.");
   }
 
+  const neededConnections = (
+    await hydrateNeededConnections(
+      user.id,
+      toolServerSlugs(parsed.data).map((serverSlug) => ({
+        serverSlug,
+        reason: `This workflow uses ${serverSlug}.`,
+      })),
+    )
+  ).map((need) => ({
+    ...need,
+    reason: `This workflow uses ${need.server.name}.`,
+  }));
+
   return (
     <WorkflowStudio
       workflows={workflows.map((workflow) => ({
@@ -59,6 +73,7 @@ export default async function WorkflowPage({
       connections={servers.filter(
         (server) => server.connection?.status === "CONNECTED",
       )}
+      neededConnections={neededConnections}
     />
   );
 }

@@ -26,7 +26,9 @@ type Config struct {
 	Concurrency      int
 	PollInterval     time.Duration
 	ScheduleInterval time.Duration
-	ReapInterval     time.Duration
+	// MisfireGrace: slots later than this are skipped.
+	MisfireGrace time.Duration
+	ReapInterval time.Duration
 	// StepTimeout caps a single tool or model call.
 	StepTimeout time.Duration
 	// RunTimeout caps a whole run; one older than this plus ReapGrace is dead.
@@ -91,7 +93,7 @@ func (r *Runner) every(ctx context.Context, interval time.Duration, fn func(cont
 
 func (r *Runner) schedule(ctx context.Context) {
 	now := time.Now()
-	n, err := r.store.EnqueueDue(ctx, now, 100, func(w store.DueWorkflow) *time.Time {
+	n, skipped, err := r.store.EnqueueDue(ctx, now, now.Add(-r.cfg.MisfireGrace), 100, func(w store.DueWorkflow) *time.Time {
 		// No next slot unless on a recurring schedule; a ONCE run is its only slot.
 		if w.Trigger != "SCHEDULE" || w.Cron == nil || w.Timezone == nil {
 			return nil
@@ -110,6 +112,9 @@ func (r *Runner) schedule(ctx context.Context) {
 			r.log.Error("enqueue due workflows", "err", err)
 		}
 		return
+	}
+	if skipped > 0 {
+		r.log.Warn("skipped stale scheduled runs", "count", skipped, "grace", r.cfg.MisfireGrace)
 	}
 	if n > 0 {
 		r.log.Info("enqueued scheduled runs", "count", n)

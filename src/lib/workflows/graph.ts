@@ -70,9 +70,10 @@ const triggerNode = z.object({
 /**
  * Transforms the previous step's output with a language model.
  *
- * Summarising, rewriting, extracting and classifying are the glue between
- * tool calls, and none of them is an MCP tool — asking a workflow to
- * "summarise my mail" is unbuildable without this node kind.
+ * Summarising, rewriting, extracting, classifying and looking up current
+ * facts on the public web are the glue between tool calls, and none of them
+ * is an MCP tool — asking a workflow to "summarise my mail" or "search for
+ * today's headlines" is unbuildable without this node kind.
  */
 const llmNode = z.object({
   id: nodeId,
@@ -156,6 +157,15 @@ export const graphSchema = z
 export type WorkflowGraph = z.infer<typeof graphSchema>;
 export type WorkflowNode = z.infer<typeof node>;
 export type WorkflowEdge = WorkflowGraph["edges"][number];
+
+/** Unique MCP server slugs named by tool steps. */
+export function toolServerSlugs(graph: WorkflowGraph): string[] {
+  const slugs = new Set<string>();
+  for (const item of graph.nodes) {
+    if (item.kind === "tool") slugs.add(item.serverSlug);
+  }
+  return [...slugs];
+}
 
 /** A new workflow starts as a single trigger so the Zod invariant holds. */
 export function emptyGraph(): WorkflowGraph {

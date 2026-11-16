@@ -1,22 +1,17 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import AttractButton from "@/components/kokonutui/attract-button";
+import Link from "next/link";
 import SlideTextButton from "@/components/kokonutui/slide-text-button";
 
 export function HeroCta() {
-  const router = useRouter();
-
   return (
     <div className="mt-10 flex flex-col items-center gap-8 sm:flex-row sm:gap-10">
-      <AttractButton
-        className="h-11 min-w-48 rounded-xl px-6 text-[15px]"
-        density={1.15}
-        radius={68}
-        onClick={() => router.push("/sign-up")}
+      <Link
+        href="/sign-up"
+        className="inline-flex h-11 min-w-48 items-center justify-center rounded-xl bg-primary px-6 text-[15px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/85"
       >
         Start building
-      </AttractButton>
+      </Link>
       <SlideTextButton
         href="#how"
         variant="ghost"

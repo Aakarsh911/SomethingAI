@@ -50,6 +50,7 @@ func main() {
 		Concurrency:      concurrency,
 		PollInterval:     envDuration("WORKER_POLL_INTERVAL", time.Second),
 		ScheduleInterval: envDuration("WORKER_SCHEDULE_INTERVAL", 15*time.Second),
+		MisfireGrace:     envDuration("WORKER_MISFIRE_GRACE", 24*time.Hour),
 		ReapInterval:     time.Minute,
 		StepTimeout:      60 * time.Second,
 		RunTimeout:       envDuration("WORKER_RUN_TIMEOUT", 15*time.Minute),
