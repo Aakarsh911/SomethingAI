@@ -20,6 +20,7 @@ type DraftStep = {
   serverSlug: string | null;
   toolSlug: string | null;
   purpose: string;
+  after: number | null;
 };
 
 type Draft = {
@@ -424,6 +425,15 @@ export function WorkflowChat() {
                           : `${step.serverSlug}/${step.toolSlug}`}
                       </span>
                       <p className="mt-0.5 text-foreground/85">{step.purpose}</p>
+                      {/* Steps that follow the one just above are the usual
+                          case; only call out the ones that split off. */}
+                      {step.after !== i - 1 && i > 0 && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {step.after === null
+                            ? "Also runs straight from the start"
+                            : `Also runs on step ${step.after + 1}'s result`}
+                        </p>
+                      )}
                     </li>
                   ))}
                 </ol>

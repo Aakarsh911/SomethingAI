@@ -18,10 +18,22 @@ var undefined = undefinedValue{}
 
 // Scope is what templates can read.
 type Scope struct {
-	// Previous is the output of the last non-branch step.
+	// Previous is the output of the nearest non-branch ancestor.
 	Previous any
-	// Steps maps node id to output for every step that has run.
+	// Steps maps node id to output for every ancestor that has run. A step on
+	// a sibling path is not in it, even if it ran first.
 	Steps map[string]any
+}
+
+// with returns a copy of s after a step ran. Copied rather than mutated
+// because sibling paths start from the same scope.
+func (s Scope) with(nodeID string, output any) Scope {
+	steps := make(map[string]any, len(s.Steps)+1)
+	for id, value := range s.Steps {
+		steps[id] = value
+	}
+	steps[nodeID] = output
+	return Scope{Previous: output, Steps: steps}
 }
 
 // TemplateError is a reference that cannot be resolved.
