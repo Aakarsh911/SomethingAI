@@ -83,6 +83,30 @@ func TestLinearToolThenLLM(t *testing.T) {
 	}
 }
 
+func TestWebhookPayloadSeedsPrevious(t *testing.T) {
+	g := mustGraph(t, `{
+		"nodes": [
+			{"id": "t", "kind": "trigger"},
+			{"id": "note", "kind": "tool", "serverSlug": "slack", "toolSlug": "SLACK_SEND", "inputs": {"text": "{{trigger.body.message}}"}}
+		],
+		"edges": [{"from": "t", "to": "note"}]
+	}`)
+
+	r := &recorder{}
+	env := r.env(func(ToolCall) (any, error) { return "ok", nil })
+	env.TriggerInput = map[string]any{
+		"method": "POST",
+		"body":   map[string]any{"message": "hello from hook"},
+	}
+	result := Execute(context.Background(), g, env)
+	if result.Status != RunSucceeded {
+		t.Fatalf("status = %s, error = %q", result.Status, result.Error)
+	}
+	if got := r.tools[0].Inputs["text"]; got != "hello from hook" {
+		t.Errorf("text = %#v", got)
+	}
+}
+
 func TestWholePlaceholderKeepsType(t *testing.T) {
 	scope := Scope{Previous: map[string]any{"ids": []any{json.Number("1"), json.Number("2")}}, Steps: map[string]any{}}
 

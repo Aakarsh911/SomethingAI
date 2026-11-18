@@ -167,6 +167,12 @@ model Workflow {
   nextRunAt DateTime?
   lastRunAt DateTime?
 
+  /**
+   * Capability URL secret for WEBHOOK workflows. Anyone who knows it can
+   * enqueue a run, so it is shown only to the owner in the studio.
+   */
+  webhookSecret String? @unique
+
   runs     WorkflowRun[]
   versions WorkflowVersion[]
 
@@ -203,6 +209,12 @@ model WorkflowRun {
   trigger WorkflowTrigger
 
   dryRun Boolean @default(false)
+
+  /**
+   * Payload that started the run. For WEBHOOK this is the incoming request
+   * (method, query, headers, body); other triggers leave it null.
+   */
+  input Json?
 
   graphSnapshot Json
   graphVersion  Int

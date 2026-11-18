@@ -87,12 +87,12 @@ export function assertValidRunAt(
   }
 }
 
-/** The triggers a user can choose in the studio. WEBHOOK is not one yet. */
-export const USER_TRIGGERS = ["MANUAL", "SCHEDULE", "ONCE"] as const satisfies readonly WorkflowTrigger[];
+/** The triggers a user can choose in the studio. */
+export const USER_TRIGGERS = ["MANUAL", "SCHEDULE", "ONCE", "WEBHOOK"] as const satisfies readonly WorkflowTrigger[];
 export type UserTrigger = (typeof USER_TRIGGERS)[number];
 
 /** The triggers the AI builder can write. It never asks for a date, so no ONCE. */
-export const GENERATED_TRIGGERS = ["MANUAL", "SCHEDULE"] as const satisfies readonly UserTrigger[];
+export const GENERATED_TRIGGERS = ["MANUAL", "SCHEDULE", "WEBHOOK"] as const satisfies readonly UserTrigger[];
 export type GeneratedTrigger = (typeof GENERATED_TRIGGERS)[number];
 
 export function isUserTrigger(value: unknown): value is UserTrigger {
@@ -109,6 +109,8 @@ export type WorkflowSchedule = {
   runAt: string | null;
   nextRunAt: string | null;
   lastRunAt: string | null;
+  /** Relative path of the inbound URL. Null unless this is a webhook workflow. */
+  webhookUrl: string | null;
 };
 
 export function scheduleView(workflow: {
@@ -119,6 +121,7 @@ export function scheduleView(workflow: {
   runAt: Date | null;
   nextRunAt: Date | null;
   lastRunAt: Date | null;
+  webhookSecret?: string | null;
 }): WorkflowSchedule {
   return {
     trigger: workflow.trigger,
@@ -128,6 +131,9 @@ export function scheduleView(workflow: {
     runAt: workflow.runAt?.toISOString() ?? null,
     nextRunAt: workflow.nextRunAt?.toISOString() ?? null,
     lastRunAt: workflow.lastRunAt?.toISOString() ?? null,
+    webhookUrl: workflow.webhookSecret
+      ? `/api/hooks/${workflow.webhookSecret}`
+      : null,
   };
 }
 

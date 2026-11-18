@@ -44,5 +44,12 @@ export function summarizeSchedule(schedule: WorkflowSchedule): {
     };
   }
 
+  if (schedule.trigger === "WEBHOOK") {
+    return {
+      text: "When a webhook is received",
+      off: !schedule.isEnabled,
+    };
+  }
+
   return { text: "Only when you click Run now", off: false };
 }

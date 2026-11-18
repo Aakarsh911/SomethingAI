@@ -35,6 +35,7 @@ const schedulePatch = z.object({
     .nullable()
     .optional(),
   isEnabled: z.boolean().optional(),
+  rotateWebhook: z.boolean().optional(),
 });
 
 function serialize(workflow: NonNullable<Awaited<ReturnType<typeof getWorkflow>>>) {
