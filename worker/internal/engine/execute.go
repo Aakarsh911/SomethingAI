@@ -49,6 +49,10 @@ type Env struct {
 	CallTool  func(ctx context.Context, call ToolCall) (any, error)
 	CallModel func(ctx context.Context, call ModelCall) (string, error)
 
+	// TriggerInput is the webhook (or other inbound) payload. It becomes
+	// Previous for the first step; nil for manual and scheduled runs.
+	TriggerInput any
+
 	// OnStep is called as each step settles, so a crashed run still leaves a
 	// readable log. An error here fails the run.
 	OnStep func(StepOutcome) error
@@ -139,7 +143,11 @@ func Execute(ctx context.Context, g *graph.Graph, env Env) Result {
 	}
 
 	reached := map[string]bool{trigger.ID: true}
-	stack := []path{{node: trigger, scope: Scope{Previous: nil, Steps: map[string]any{}}}}
+	start := Scope{Previous: env.TriggerInput, Steps: map[string]any{}}
+	if env.TriggerInput != nil {
+		start.Steps[trigger.ID] = env.TriggerInput
+	}
+	stack := []path{{node: trigger, scope: start}}
 
 	for len(stack) > 0 {
 		current := stack[len(stack)-1]

@@ -255,6 +255,7 @@ func (r *Runner) execute(run store.ClaimedRun) {
 		})
 	}
 
+	env.TriggerInput = run.Input
 	result := engine.Execute(ctx, g, env)
 	finish(string(result.Status), result.Error, result.Output)
 }

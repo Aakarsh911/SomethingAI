@@ -8,6 +8,7 @@ import {
   type WorkflowGraph,
 } from "@/lib/workflows/graph";
 import { ScheduleError, assertValidRunAt, nextRunAt } from "@/lib/workflows/schedule";
+import { mintWebhookSecret } from "@/lib/workflows/webhook";
 
 /**
  * Persistence for workflows and their run history.
@@ -76,6 +77,8 @@ export type WorkflowInput = {
   runAt?: Date | null;
   /** IANA zone for `cron` or `runAt`; required with either. */
   timezone?: string | null;
+  /** Replace the webhook URL. Ignored unless the trigger is WEBHOOK. */
+  rotateWebhook?: boolean;
   versionNote?: string | null;
 };
 
@@ -185,6 +188,7 @@ export function createWorkflow(userId: string, input: WorkflowInput) {
         serverSlugs: collectServerSlugs(input.graph),
         trigger,
         isEnabled: input.isEnabled ?? false,
+        webhookSecret: trigger === "WEBHOOK" ? mintWebhookSecret() : undefined,
         ...schedule,
       },
     });
@@ -250,6 +254,15 @@ export async function updateWorkflow(
         input.runAt !== undefined ? input.runAt : current.runAt,
       ),
     );
+  }
+
+  if (input.rotateWebhook) {
+    if (trigger !== "WEBHOOK") {
+      throw new ScheduleError("Only a webhook workflow has a URL to rotate.");
+    }
+    data.webhookSecret = mintWebhookSecret();
+  } else if (trigger === "WEBHOOK" && !current.webhookSecret) {
+    data.webhookSecret = mintWebhookSecret();
   }
 
   const updated = await prisma.$transaction(async (tx) => {
@@ -336,7 +349,7 @@ export async function enqueueRun(
   userId: string,
   workflowId: string,
   trigger: WorkflowTrigger,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; input?: unknown } = {},
 ) {
   const workflow = await getWorkflow(userId, workflowId);
   if (!workflow) return null;
@@ -347,10 +360,73 @@ export async function enqueueRun(
       status: "QUEUED",
       trigger,
       dryRun: options.dryRun ?? false,
+      input:
+        options.input === undefined
+          ? undefined
+          : (options.input as Prisma.InputJsonValue),
       graphSnapshot: workflow.graph as Prisma.InputJsonValue,
       graphVersion: workflow.graphVersion,
     },
   });
+}
+
+export type WebhookLookup = "unknown" | "disabled" | "ok";
+
+export async function lookupWebhook(secret: string): Promise<WebhookLookup> {
+  const workflow = await prisma.workflow.findFirst({
+    where: { webhookSecret: secret, trigger: "WEBHOOK" },
+    select: { isEnabled: true },
+  });
+  if (!workflow) return "unknown";
+  if (!workflow.isEnabled) return "disabled";
+  return "ok";
+}
+
+export type WebhookEnqueueResult =
+  | { kind: "unknown" }
+  | { kind: "disabled" }
+  | { kind: "queued"; runId: string };
+
+/**
+ * Public webhook ingest. Auth is the unguessable secret in the URL, not a
+ * session: the caller is GitHub, Stripe, a form, not the workflow's owner.
+ */
+export async function enqueueWebhookRun(
+  secret: string,
+  input: unknown,
+): Promise<WebhookEnqueueResult> {
+  const workflow = await prisma.workflow.findFirst({
+    where: { webhookSecret: secret, trigger: "WEBHOOK" },
+    select: {
+      id: true,
+      isEnabled: true,
+      graph: true,
+      graphVersion: true,
+    },
+  });
+  if (!workflow) return { kind: "unknown" };
+  if (!workflow.isEnabled) return { kind: "disabled" };
+
+  const now = new Date();
+  const [run] = await prisma.$transaction([
+    prisma.workflowRun.create({
+      data: {
+        workflowId: workflow.id,
+        status: "QUEUED",
+        trigger: "WEBHOOK",
+        input: input as Prisma.InputJsonValue,
+        graphSnapshot: workflow.graph as Prisma.InputJsonValue,
+        graphVersion: workflow.graphVersion,
+      },
+      select: { id: true },
+    }),
+    prisma.workflow.update({
+      where: { id: workflow.id },
+      data: { lastRunAt: now },
+    }),
+  ]);
+
+  return { kind: "queued", runId: run.id };
 }
 
 /** One run with its steps in execution order. Ownership-scoped via the join. */

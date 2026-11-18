@@ -21,6 +21,7 @@ import {
   hintClass,
   labelClass,
   primaryButtonClass,
+  secondaryButtonClass,
 } from "./styles";
 import { hasFired } from "./schedule-context";
 
@@ -36,6 +37,7 @@ const MODE_LABELS: Record<UserTrigger, string> = {
   MANUAL: "Only when I click Run now",
   SCHEDULE: "On a repeating schedule",
   ONCE: "Once, at a date and time",
+  WEBHOOK: "When a webhook is received",
 };
 
 export type SchedulePatch = {
@@ -44,6 +46,7 @@ export type SchedulePatch = {
   timezone: string | null;
   runAt: string | null;
   isEnabled: boolean;
+  rotateWebhook?: boolean;
 };
 
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -84,6 +87,7 @@ export function ScheduleInspector({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // A recurring schedule keeps its saved zone; a one-off uses the browser's.
   const zone =
@@ -113,6 +117,12 @@ export function ScheduleInspector({
       return {
         ok: true,
         patch: { trigger: mode, cron: null, timezone: null, runAt: null, isEnabled: false },
+      };
+    }
+    if (mode === "WEBHOOK") {
+      return {
+        ok: true,
+        patch: { trigger: mode, cron: null, timezone: null, runAt: null, isEnabled: enabled },
       };
     }
     if (mode === "SCHEDULE") {
@@ -170,12 +180,6 @@ export function ScheduleInspector({
         </button>
       }
     >
-      {schedule.trigger === "WEBHOOK" ? (
-        <p className={`mb-3 ${hintClass}`}>
-          This workflow runs from a webhook. Saving a schedule here replaces it.
-        </p>
-      ) : null}
-
       <fieldset className="flex flex-col gap-1.5">
         <legend className={labelClass}>Runs</legend>
         {USER_TRIGGERS.map((value) => (
@@ -187,6 +191,7 @@ export function ScheduleInspector({
               onChange={() => {
                 setMode(value);
                 setSaved(false);
+                if (value === "WEBHOOK") setEnabled(true);
               }}
             />
             {MODE_LABELS[value]}
@@ -339,6 +344,71 @@ export function ScheduleInspector({
         </section>
       ) : null}
 
+      {mode === "WEBHOOK" ? (
+        <section className="mt-4 flex flex-col gap-3 border-t border-border pt-3">
+          {schedule.webhookUrl ? (
+            <>
+              <div>
+                <p className={labelClass}>URL</p>
+                <p className="mt-1 break-all rounded-lg bg-muted px-2 py-1.5 font-mono text-[11px] text-foreground">
+                  {typeof window === "undefined"
+                    ? schedule.webhookUrl
+                    : `${window.location.origin}${schedule.webhookUrl}`}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={primaryButtonClass}
+                  onClick={() => {
+                    const url = `${window.location.origin}${schedule.webhookUrl}`;
+                    void navigator.clipboard.writeText(url).then(() => {
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1500);
+                    });
+                  }}
+                >
+                  {copied ? "Copied" : "Copy URL"}
+                </button>
+                <button
+                  type="button"
+                  className={secondaryButtonClass}
+                  onClick={() => {
+                    void onSave({
+                      trigger: "WEBHOOK",
+                      cron: null,
+                      timezone: null,
+                      runAt: null,
+                      isEnabled: enabled,
+                      rotateWebhook: true,
+                    }).then((failure) => {
+                      if (failure) setError(failure);
+                      else {
+                        setError(null);
+                        setSaved(true);
+                      }
+                    });
+                  }}
+                >
+                  Rotate URL
+                </button>
+              </div>
+              <p className={hintClass}>
+                POST JSON here — or GET, PUT, PATCH, DELETE. The body is{" "}
+                <span className="font-mono">{"{{trigger.body}}"}</span>
+                ; the whole request is{" "}
+                <span className="font-mono">{"{{previous.output}}"}</span>.
+                Rotating invalidates the old URL.
+              </p>
+            </>
+          ) : (
+            <p className={hintClass}>
+              Save to create a URL. Anyone who has it can start this workflow.
+            </p>
+          )}
+        </section>
+      ) : null}
+
       {mode !== "MANUAL" ? (
         <label className="mt-4 flex cursor-pointer items-start gap-2 border-t border-border pt-3 text-sm">
           <input
@@ -350,7 +420,9 @@ export function ScheduleInspector({
           <span>
             On
             <span className={`block ${hintClass}`}>
-              Off keeps the schedule but nothing runs. Run now still works.
+              {mode === "WEBHOOK"
+                ? "Off rejects incoming requests. Run now still works, without a payload."
+                : "Off keeps the schedule but nothing runs. Run now still works."}
             </span>
           </span>
         </label>

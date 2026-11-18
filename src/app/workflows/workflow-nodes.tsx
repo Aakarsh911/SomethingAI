@@ -47,7 +47,7 @@ export function TriggerNode({ data }: NodeProps<FlowNode>) {
           ) : null}
         </p>
       ) : null}
-      <p className="mt-1.5 text-[10px] text-subtle">Click to schedule</p>
+      <p className="mt-1.5 text-[10px] text-subtle">Click to configure</p>
       <Handle type="source" position={Position.Right} className={handleClass} />
     </div>
   );

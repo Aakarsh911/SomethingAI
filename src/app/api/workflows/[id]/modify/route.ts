@@ -12,6 +12,7 @@ import {
 } from "@/lib/ai/generate-workflow";
 import { parseGraph, type WorkflowGraph } from "@/lib/workflows/graph";
 import {
+  isUserTrigger,
   isValidTimezone,
   ScheduleError,
   scheduleView,
@@ -78,16 +79,6 @@ export async function POST(
       { status: 422 },
     );
   }
-  if (workflow.trigger === "WEBHOOK") {
-    return Response.json(
-      {
-        error:
-          "Text editing currently supports manual and scheduled workflows, not webhook triggers.",
-      },
-      { status: 422 },
-    );
-  }
-
   const claimed =
     typeof body.timezone === "string" ? body.timezone.trim() : "";
   const timezone = isValidTimezone(claimed) ? claimed : "UTC";
@@ -108,7 +99,7 @@ export async function POST(
         name: workflow.name,
         description: workflow.description,
         graph: parsed.data,
-        trigger: workflow.trigger,
+        trigger: isUserTrigger(workflow.trigger) ? workflow.trigger : "MANUAL",
         cron: workflow.cron,
         timezone: workflow.timezone,
         runAt: workflow.runAt?.toISOString() ?? null,
@@ -135,10 +126,11 @@ export async function POST(
     const latestInstruction =
       messages.find((message) => message.role === "user")?.content ??
       "Updated with AI";
-    // The model cannot write ONCE, so MANUAL here means "schedule unchanged";
-    // writing it back would cancel the user's one-off.
+    // The model cannot write ONCE, and often forgets WEBHOOK, so MANUAL here
+    // means "leave when it runs alone". Writing it back would cancel either.
     const keepSchedule =
-      workflow.trigger === "ONCE" && result.draft.trigger === "MANUAL";
+      (workflow.trigger === "ONCE" || workflow.trigger === "WEBHOOK") &&
+      result.draft.trigger === "MANUAL";
     const updated = await updateWorkflow(user.id, workflow.id, {
       name: result.draft.name.slice(0, 120),
       description: result.draft.description.slice(0, 2000),

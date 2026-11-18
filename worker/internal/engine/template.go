@@ -152,6 +152,9 @@ func lookup(rawPath string, scope Scope) (any, error) {
 		}
 		return walk(scope.Previous, parts[2:], rawPath)
 
+	case "trigger", "webhook":
+		return walk(scope.Previous, parts[1:], rawPath)
+
 	case "steps":
 		nodeID := ""
 		if len(parts) > 1 {

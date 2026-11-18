@@ -311,8 +311,16 @@ RULES
    set trigger to SCHEDULE, write a five-field cron, and set timezone to
    ${timezone} unless they name a different one. The cron is read in that
    zone, not UTC.
-4. If no recurrence is described, trigger is MANUAL and cron and timezone are
-   both null.
+3a. If the user wants this to run when an HTTP request arrives ("webhook",
+   "POST to a URL", "when GitHub/Stripe/a form notifies us"), set trigger to
+   WEBHOOK, and leave cron and timezone null. Do not invent a webhook
+   integration. The request is the first step's previous output:
+     {{previous.output}}       the whole request (method, query, headers, body)
+     {{previous.output.body}}  JSON or form body
+     {{trigger.body}}          same as previous.output.body
+   In EDIT MODE, keep WEBHOOK unless they ask to change when it runs.
+4. If no recurrence and no webhook is described, trigger is MANUAL and cron
+   and timezone are both null.
 5. Pick a concrete hour for vague times: "morning" is 09:00, "evening" 18:00.
 6. Use only the argument names listed under "args" for each tool, spelled
    exactly as shown. Do not invent argument names and do not rewrite them
@@ -468,7 +476,13 @@ function planToGraph(
   const nodes: unknown[] = [
     oldTrigger
       ? { ...oldTrigger }
-      : { id: triggerId, kind: "trigger", label: "Start", position: at(0), config: {} },
+      : {
+          id: triggerId,
+          kind: "trigger",
+          label: plan.trigger === "WEBHOOK" ? "Webhook" : "Start",
+          position: at(0),
+          config: {},
+        },
   ];
   const edges: unknown[] = [];
   const existingSteps =
@@ -760,6 +774,8 @@ export async function generateWorkflowDraft(input: {
     // never reaches the confirmation screen looking legitimate.
     assertValidSchedule(cron, timezone);
     scheduleLabel = describeSchedule(cron, timezone);
+  } else if (plan.trigger === "WEBHOOK") {
+    scheduleLabel = "Runs when a webhook is received";
   }
 
   const assembled = planToGraph(plan, input.tools, input.existing?.graph);

@@ -195,6 +195,7 @@ type ClaimedRun struct {
 	Trigger       string
 	GraphSnapshot string
 	DryRun        bool
+	Input         any
 }
 
 // ClaimQueued moves up to limit QUEUED runs to RUNNING and returns them;
@@ -212,7 +213,7 @@ func (s *Store) ClaimQueued(ctx context.Context, now time.Time, limit int) ([]Cl
 			LIMIT $2
 			FOR UPDATE SKIP LOCKED
 		  )
-		RETURNING r.id, r."workflowId", w."userId", r.trigger::text, r."graphSnapshot"::text, r."dryRun"`,
+		RETURNING r.id, r."workflowId", w."userId", r.trigger::text, r."graphSnapshot"::text, r."dryRun", r.input::text`,
 		ts(now), limit,
 	)
 	if err != nil {
@@ -220,7 +221,12 @@ func (s *Store) ClaimQueued(ctx context.Context, now time.Time, limit int) ([]Cl
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ClaimedRun, error) {
 		var r ClaimedRun
-		err := row.Scan(&r.ID, &r.WorkflowID, &r.UserID, &r.Trigger, &r.GraphSnapshot, &r.DryRun)
+		var input *string
+		err := row.Scan(&r.ID, &r.WorkflowID, &r.UserID, &r.Trigger, &r.GraphSnapshot, &r.DryRun, &input)
+		if err != nil {
+			return r, err
+		}
+		r.Input, err = decodeJSON(input)
 		return r, err
 	})
 }
@@ -328,6 +334,19 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func decodeJSON(raw *string) (any, error) {
+	if raw == nil || *raw == "" || *raw == "null" {
+		return nil, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(*raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, fmt.Errorf("decode run input: %w", err)
+	}
+	return value, nil
 }
 
 // encodeJSON renders a value for a jsonb column; nil becomes SQL NULL.
