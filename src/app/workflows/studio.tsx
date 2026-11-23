@@ -7,6 +7,7 @@ import {
   StatusIsland,
   type IslandTask,
 } from "@/components/kokonutui/status-island";
+import { RunsDashboard } from "@/components/runs-dashboard";
 import type { McpServerView } from "@/lib/mcp/servers";
 import { cn } from "@/lib/utils";
 import { isUnconfiguredTool, type WorkflowGraph } from "@/lib/workflows/graph";
@@ -14,7 +15,7 @@ import type { RunSummary } from "@/lib/workflows/runtime";
 import type { WorkflowSchedule } from "@/lib/workflows/schedule";
 import type { WorkflowVersionView } from "@/lib/workflows/store";
 import { ReactFlowProvider } from "@xyflow/react";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -371,6 +372,7 @@ function StudioInner({
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isRecordinggg, setIsRecordinggg] = useState(false);
   const stopRecordingRef = useRef<(() => void) | null>(null);
+  const [showRuns, setShowRuns] = useState(true);
 
   function stopRecordingOnSubmit() {
     if (stopRecordingRef.current) {
@@ -437,6 +439,23 @@ function StudioInner({
             </ul>
           )}
         </nav>
+
+        {selected && (
+          <div className="border-t border-border">
+            <button
+              onClick={() => setShowRuns(!showRuns)}
+              className="flex w-full items-center justify-between px-4 py-3 text-sm font-semibold text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <span>Recent runs</span>
+              {showRuns ? (
+                <ChevronDown className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 text-muted-foreground" />
+              )}
+            </button>
+            {showRuns && <RunsDashboard workflowId={selected.id} />}
+          </div>
+        )}
       </aside>}
 
       <section className="flex min-w-0 flex-1 flex-col">

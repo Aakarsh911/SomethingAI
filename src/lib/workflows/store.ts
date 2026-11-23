@@ -374,3 +374,15 @@ export function listRuns(userId: string, workflowId: string, take = 20) {
     include: { stepRuns: { orderBy: { createdAt: "asc" } } },
   });
 }
+
+export function listAllRuns(userId: string, take = 50) {
+  return prisma.workflowRun.findMany({
+    where: { workflow: { userId } },
+    orderBy: { createdAt: "desc" },
+    take,
+    include: {
+      stepRuns: { orderBy: { createdAt: "asc" } },
+      workflow: { select: { id: true, name: true } },
+    },
+  });
+}

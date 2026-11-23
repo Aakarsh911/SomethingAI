@@ -11,6 +11,11 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   {
+    href: "/dashboard",
+    label: "Dashboard",
+    match: (path: string) => path.startsWith("/dashboard"),
+  },
+  {
     href: "/workflows",
     label: "Workflows",
     match: (path: string) => path.startsWith("/workflows") && path !== "/workflows/new",
@@ -28,7 +33,7 @@ export function AppHeader({ workflows }: { workflows?: CommandWorkflow[] }) {
   return (
     <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-background">
       <div className="flex h-14 items-center gap-3 px-4 sm:px-5">
-        <Brand href="/workflows" />
+        <Brand href="/dashboard" />
 
         <nav className="hidden items-center gap-1 rounded-full bg-muted p-1 sm:flex">
           {NAV.map((item) => {
