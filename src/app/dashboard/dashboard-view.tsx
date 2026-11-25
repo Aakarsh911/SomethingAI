@@ -225,39 +225,70 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
     queued: runs.filter((r) => r.status === "QUEUED").length,
   };
 
-  // Group runs by day for the chart
+  // Group runs by day or month for the chart
   const runsByDay = React.useMemo(() => {
-    const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : timeRange === "90d" ? 90 : 365;
     const groups = new Map<string, { succeeded: number; failed: number; total: number }>();
 
-    // Fill in all days with 0 counts
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric'
-      });
-      groups.set(dateStr, { succeeded: 0, failed: 0, total: 0 });
-    }
+    if (timeRange === "ytd") {
+      // Group by month for YTD
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth();
 
-    // Count actual runs
-    runs.forEach((run) => {
-      const runDate = new Date(run.createdAt);
-      const daysDiff = Math.floor((Date.now() - runDate.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysDiff < days) {
-        const dateStr = runDate.toLocaleDateString('en-US', {
+      // Fill all months from Jan to current month
+      for (let month = 0; month <= currentMonth; month++) {
+        const date = new Date(currentYear, month, 1);
+        const monthStr = date.toLocaleDateString('en-US', { month: 'short' });
+        groups.set(monthStr, { succeeded: 0, failed: 0, total: 0 });
+      }
+
+      // Count runs by month
+      runs.forEach((run) => {
+        const runDate = new Date(run.createdAt);
+        if (runDate.getFullYear() === currentYear) {
+          const monthStr = runDate.toLocaleDateString('en-US', { month: 'short' });
+          const existing = groups.get(monthStr);
+          if (existing) {
+            existing.total++;
+            if (run.status === "SUCCEEDED") existing.succeeded++;
+            if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
+          }
+        }
+      });
+    } else {
+      // Group by day for 7D, 30D, 90D
+      const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+
+      // Fill in all days with 0 counts
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric'
         });
-
-        const existing = groups.get(dateStr) || { succeeded: 0, failed: 0, total: 0 };
-        existing.total++;
-        if (run.status === "SUCCEEDED") existing.succeeded++;
-        if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
-        groups.set(dateStr, existing);
+        groups.set(dateStr, { succeeded: 0, failed: 0, total: 0 });
       }
-    });
+
+      // Count actual runs
+      runs.forEach((run) => {
+        const runDate = new Date(run.createdAt);
+        const daysDiff = Math.floor((Date.now() - runDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysDiff < days) {
+          const dateStr = runDate.toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric'
+          });
+
+          const existing = groups.get(dateStr);
+          if (existing) {
+            existing.total++;
+            if (run.status === "SUCCEEDED") existing.succeeded++;
+            if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
+          }
+        }
+      });
+    }
 
     return Array.from(groups.entries()).map(([date, counts]) => ({ date, ...counts }));
   }, [runs, timeRange]);
@@ -276,10 +307,6 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-ok" />
-              {stats.succeeded} succeeded
-            </span>
             <span className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
               {stats.total} total runs
             </span>
@@ -337,22 +364,29 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                 </button>
               </div>
             </div>
-            <div className="flex items-end justify-center gap-2 h-32 overflow-x-auto">
-              {runsByDay.slice(timeRange === "7d" ? -7 : timeRange === "30d" ? -30 : -90).map((day, idx) => {
-                const maxHeight = Math.max(...runsByDay.map((d) => d.total));
+            <div className={cn(
+              "flex items-end justify-center h-32",
+              timeRange === "7d" || timeRange === "30d" ? "gap-2" : timeRange === "90d" ? "gap-0.5" : "gap-2"
+            )}>
+              {(timeRange === "ytd" ? runsByDay : runsByDay.slice(timeRange === "7d" ? -7 : timeRange === "30d" ? -30 : -90)).map((day, idx) => {
+                const maxHeight = Math.max(1, ...runsByDay.map((d) => d.total));
                 const height = (day.total / maxHeight) * 100;
                 const successRate = day.total > 0 ? (day.succeeded / day.total) * 100 : 0;
 
                 return (
                   <div key={idx} className="flex flex-col items-center gap-2 shrink-0">
                     <div className={cn(
-                      "relative h-16 flex flex-col-reverse gap-0.5",
-                      timeRange === "7d" ? "w-12" : timeRange === "30d" ? "w-6" : "w-3"
+                      "relative h-16 flex flex-col-reverse items-center",
+                      timeRange === "7d" ? "w-12" : timeRange === "30d" ? "w-6" : timeRange === "90d" ? "w-1.5" : "w-12"
                     )}>
                       {day.succeeded > 0 && (
                         <div
-                          className="w-full rounded-t bg-g-green transition-all hover:opacity-80"
-                          style={{ height: `${(day.succeeded / maxHeight) * 64}px` }}
+                          className="w-full bg-g-green transition-all hover:opacity-80"
+                          style={{
+                            height: `${(day.succeeded / maxHeight) * 64}px`,
+                            borderTopLeftRadius: day.failed === 0 ? '0.25rem' : 0,
+                            borderTopRightRadius: day.failed === 0 ? '0.25rem' : 0
+                          }}
                           title={`${day.succeeded} succeeded`}
                         />
                       )}
@@ -363,15 +397,20 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                           title={`${day.failed} failed`}
                         />
                       )}
+                      {day.total > 0 && (timeRange === "7d" || timeRange === "30d" || timeRange === "ytd") && (
+                        <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-background pointer-events-none">
+                          {day.total}
+                        </span>
+                      )}
                     </div>
                     <div className="text-center">
-                      {timeRange === "7d" && (
-                        <>
-                          <p className="text-xs font-medium">{day.total}</p>
-                          <p className="text-[10px] text-muted-foreground">{day.date}</p>
-                        </>
+                      {(timeRange === "7d" || timeRange === "ytd") && (
+                        <p className="text-[10px] text-muted-foreground">{day.date}</p>
                       )}
-                      {timeRange !== "7d" && (idx % (timeRange === "30d" ? 5 : 15) === 0 || idx === runsByDay.length - 1) && (
+                      {timeRange === "30d" && (idx % 5 === 0 || idx === runsByDay.length - 1) && (
+                        <p className="text-[10px] text-muted-foreground whitespace-nowrap">{day.date}</p>
+                      )}
+                      {timeRange === "90d" && (idx % 15 === 0 || idx === runsByDay.length - 1) && (
                         <p className="text-[10px] text-muted-foreground whitespace-nowrap">{day.date}</p>
                       )}
                     </div>
