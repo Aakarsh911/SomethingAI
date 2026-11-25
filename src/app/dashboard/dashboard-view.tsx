@@ -279,18 +279,18 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
 
                 return (
                   <div key={idx} className="flex flex-1 flex-col items-center gap-2">
-                    <div className="relative w-full flex flex-col-reverse gap-0.5">
+                    <div className="relative w-full h-16 flex flex-col-reverse gap-0.5">
                       {day.succeeded > 0 && (
                         <div
                           className="w-full rounded-t bg-g-green transition-all hover:opacity-80"
-                          style={{ height: `${(day.succeeded / maxHeight) * 100}%` }}
+                          style={{ height: `${(day.succeeded / maxHeight) * 64}px` }}
                           title={`${day.succeeded} succeeded`}
                         />
                       )}
                       {day.failed > 0 && (
                         <div
                           className="w-full rounded-t bg-g-red transition-all hover:opacity-80"
-                          style={{ height: `${(day.failed / maxHeight) * 100}%` }}
+                          style={{ height: `${(day.failed / maxHeight) * 64}px` }}
                           title={`${day.failed} failed`}
                         />
                       )}
