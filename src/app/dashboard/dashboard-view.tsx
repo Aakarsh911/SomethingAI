@@ -166,10 +166,13 @@ function formatSimpleObject(output: unknown): React.ReactNode {
   );
 }
 
+type TimeRange = "7d" | "30d" | "90d" | "ytd";
+
 export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
   const [runs, setRuns] = useState(initialRuns);
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [showRawOutput, setShowRawOutput] = useState<Set<string>>(new Set());
+  const [timeRange, setTimeRange] = useState<TimeRange>("7d");
 
   const toggleRun = (runId: string) => {
     setExpandedRuns((prev) => {
@@ -224,25 +227,40 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
 
   // Group runs by day for the chart
   const runsByDay = React.useMemo(() => {
+    const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : timeRange === "90d" ? 90 : 365;
     const groups = new Map<string, { succeeded: number; failed: number; total: number }>();
 
-    runs.forEach((run) => {
-      const date = new Date(run.createdAt).toLocaleDateString('en-US', {
+    // Fill in all days with 0 counts
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric'
       });
+      groups.set(dateStr, { succeeded: 0, failed: 0, total: 0 });
+    }
 
-      const existing = groups.get(date) || { succeeded: 0, failed: 0, total: 0 };
-      existing.total++;
-      if (run.status === "SUCCEEDED") existing.succeeded++;
-      if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
-      groups.set(date, existing);
+    // Count actual runs
+    runs.forEach((run) => {
+      const runDate = new Date(run.createdAt);
+      const daysDiff = Math.floor((Date.now() - runDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff < days) {
+        const dateStr = runDate.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric'
+        });
+
+        const existing = groups.get(dateStr) || { succeeded: 0, failed: 0, total: 0 };
+        existing.total++;
+        if (run.status === "SUCCEEDED") existing.succeeded++;
+        if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
+        groups.set(dateStr, existing);
+      }
     });
 
-    return Array.from(groups.entries())
-      .map(([date, counts]) => ({ date, ...counts }))
-      .slice(-7); // Last 7 days
-  }, [runs]);
+    return Array.from(groups.entries()).map(([date, counts]) => ({ date, ...counts }));
+  }, [runs, timeRange]);
 
   return (
     <div className="h-full overflow-y-auto bg-canvas">
@@ -270,16 +288,67 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
 
         {runsByDay.length > 0 && (
           <div className="mb-8 rounded-lg border border-border bg-card p-6">
-            <h2 className="mb-4 text-sm font-medium text-foreground">Activity (Last 7 Days)</h2>
-            <div className="flex items-end justify-between gap-2 h-32">
-              {runsByDay.map((day, idx) => {
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-foreground">Activity</h2>
+              <div className="flex gap-1 rounded-lg border border-border bg-muted p-1">
+                <button
+                  onClick={() => setTimeRange("7d")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    timeRange === "7d"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  7D
+                </button>
+                <button
+                  onClick={() => setTimeRange("30d")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    timeRange === "30d"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  30D
+                </button>
+                <button
+                  onClick={() => setTimeRange("90d")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    timeRange === "90d"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  90D
+                </button>
+                <button
+                  onClick={() => setTimeRange("ytd")}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                    timeRange === "ytd"
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  YTD
+                </button>
+              </div>
+            </div>
+            <div className="flex items-end justify-center gap-2 h-32 overflow-x-auto">
+              {runsByDay.slice(timeRange === "7d" ? -7 : timeRange === "30d" ? -30 : -90).map((day, idx) => {
                 const maxHeight = Math.max(...runsByDay.map((d) => d.total));
                 const height = (day.total / maxHeight) * 100;
                 const successRate = day.total > 0 ? (day.succeeded / day.total) * 100 : 0;
 
                 return (
-                  <div key={idx} className="flex flex-1 flex-col items-center gap-2">
-                    <div className="relative w-full h-16 flex flex-col-reverse gap-0.5">
+                  <div key={idx} className="flex flex-col items-center gap-2 shrink-0">
+                    <div className={cn(
+                      "relative h-16 flex flex-col-reverse gap-0.5",
+                      timeRange === "7d" ? "w-12" : timeRange === "30d" ? "w-6" : "w-3"
+                    )}>
                       {day.succeeded > 0 && (
                         <div
                           className="w-full rounded-t bg-g-green transition-all hover:opacity-80"
@@ -296,8 +365,15 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                       )}
                     </div>
                     <div className="text-center">
-                      <p className="text-xs font-medium">{day.total}</p>
-                      <p className="text-[10px] text-muted-foreground">{day.date}</p>
+                      {timeRange === "7d" && (
+                        <>
+                          <p className="text-xs font-medium">{day.total}</p>
+                          <p className="text-[10px] text-muted-foreground">{day.date}</p>
+                        </>
+                      )}
+                      {timeRange !== "7d" && (idx % (timeRange === "30d" ? 5 : 15) === 0 || idx === runsByDay.length - 1) && (
+                        <p className="text-[10px] text-muted-foreground whitespace-nowrap">{day.date}</p>
+                      )}
                     </div>
                   </div>
                 );
