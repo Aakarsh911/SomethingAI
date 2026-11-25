@@ -31,19 +31,6 @@ type DashboardRun = {
   steps: StepRun[];
 };
 
-function getStatusColor(status: RunStatus): string {
-  switch (status) {
-    case "SUCCEEDED":
-      return "bg-g-green";
-    case "FAILED":
-    case "CANCELED":
-      return "bg-g-red";
-    case "RUNNING":
-      return "bg-g-blue";
-    case "QUEUED":
-      return "bg-muted-foreground";
-  }
-}
 
 function getStatusTextColor(status: RunStatus): string {
   switch (status) {
@@ -227,11 +214,11 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
 
   // Group runs by day or month for the chart
   const runsByDay = React.useMemo(() => {
+    const now = new Date();
     const groups = new Map<string, { succeeded: number; failed: number; total: number }>();
 
     if (timeRange === "ytd") {
       // Group by month for YTD
-      const now = new Date();
       const currentYear = now.getFullYear();
       const currentMonth = now.getMonth();
 
@@ -261,7 +248,7 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
 
       // Fill in all days with 0 counts
       for (let i = days - 1; i >= 0; i--) {
-        const date = new Date();
+        const date = new Date(now);
         date.setDate(date.getDate() - i);
         const dateStr = date.toLocaleDateString('en-US', {
           month: 'short',
@@ -271,9 +258,10 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
       }
 
       // Count actual runs
+      const nowTime = now.getTime();
       runs.forEach((run) => {
         const runDate = new Date(run.createdAt);
-        const daysDiff = Math.floor((Date.now() - runDate.getTime()) / (1000 * 60 * 60 * 24));
+        const daysDiff = Math.floor((nowTime - runDate.getTime()) / (1000 * 60 * 60 * 24));
         if (daysDiff < days) {
           const dateStr = runDate.toLocaleDateString('en-US', {
             month: 'short',
@@ -298,18 +286,12 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
       <main className="mx-auto w-full max-w-6xl px-6 py-8">
         <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-[11px] font-medium tracking-[0.16em] text-brand uppercase">
-              Overview
-            </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">Dashboard</h1>
-            <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-              Workflow run history and performance metrics
-            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <span className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-              {stats.total} total runs
-            </span>
+            {/* <span className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+              
+            </span> */}
           </div>
         </div>
 
@@ -370,9 +352,6 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
             )}>
               {(timeRange === "ytd" ? runsByDay : runsByDay.slice(timeRange === "7d" ? -7 : timeRange === "30d" ? -30 : -90)).map((day, idx) => {
                 const maxHeight = Math.max(1, ...runsByDay.map((d) => d.total));
-                const height = (day.total / maxHeight) * 100;
-                const successRate = day.total > 0 ? (day.succeeded / day.total) * 100 : 0;
-
                 return (
                   <div key={idx} className="flex flex-col items-center gap-2 shrink-0">
                     <div className={cn(
@@ -438,212 +417,220 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {runs.map((run) => {
-              const duration = formatDuration(run.startedAt, run.finishedAt);
-              const isExpanded = expandedRuns.has(run.id);
-              const hasDetails = run.output || run.steps.length > 0;
+          <>
+            <div className="text-2xl font-semibold my-5">
+              Run History
+            </div>
+            <div className="my-5">
+              {stats.total} total runs
+            </div>
+            <div className="space-y-3">
+              {runs.map((run) => {
+                const duration = formatDuration(run.startedAt, run.finishedAt);
+                const isExpanded = expandedRuns.has(run.id);
+                const hasDetails = run.output || run.steps.length > 0;
 
-              return (
-                <div
-                  key={run.id}
-                  className="rounded-lg border border-border bg-card/50 backdrop-blur-sm transition-colors"
-                >
+                return (
                   <div
-                    className={cn(
-                      "flex items-start justify-between gap-3 px-4 py-3",
-                      hasDetails && "cursor-pointer hover:bg-card",
-                    )}
-                    onClick={hasDetails ? () => toggleRun(run.id) : undefined}
+                    key={run.id}
+                    className="rounded-lg border border-border bg-card/50 backdrop-blur-sm transition-colors"
                   >
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                      {hasDetails && (
-                        <button
-                          className="mt-0.5 shrink-0 text-muted-foreground transition-transform"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleRun(run.id);
-                          }}
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="size-4" />
-                          ) : (
-                            <ChevronRight className="size-4" />
-                          )}
-                        </button>
+                    <div
+                      className={cn(
+                        "flex items-start justify-between gap-3 px-4 py-3",
+                        hasDetails && "cursor-pointer hover:bg-card",
                       )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/workflows/${run.workflowId}`}
-                            className="truncate text-sm font-medium text-foreground hover:underline"
-                            onClick={(e) => e.stopPropagation()}
+                      onClick={hasDetails ? () => toggleRun(run.id) : undefined}
+                    >
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        {hasDetails && (
+                          <button
+                            className="mt-0.5 shrink-0 text-muted-foreground transition-transform"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRun(run.id);
+                            }}
                           >
-                            {run.workflowName}
-                          </Link>
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium",
-                              getStatusBgColor(run.status),
-                              getStatusTextColor(run.status),
+                            {isExpanded ? (
+                              <ChevronDown className="size-4" />
+                            ) : (
+                              <ChevronRight className="size-4" />
                             )}
-                          >
-                            {run.status.toLowerCase()}
-                          </span>
-                          <span>{relativeTime(run.finishedAt ?? run.startedAt)}</span>
-                          {duration && <span>{duration}</span>}
-                          {run.stepCount > 0 && <span>{run.stepCount} steps</span>}
-                          <span className="capitalize">{run.trigger.toLowerCase()}</span>
-                        </div>
-                        {run.error && !isExpanded && (
-                          <p className="mt-2 truncate text-xs text-g-red" title={run.error}>
-                            {run.error}
-                          </p>
+                          </button>
                         )}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/workflows/${run.workflowId}`}
+                              className="truncate text-sm font-medium text-foreground hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {run.workflowName}
+                            </Link>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-medium",
+                                getStatusBgColor(run.status),
+                                getStatusTextColor(run.status),
+                              )}
+                            >
+                              {run.status.toLowerCase()}
+                            </span>
+                            <span>{relativeTime(run.finishedAt ?? run.startedAt)}</span>
+                            {duration && <span>{duration}</span>}
+                            {run.stepCount > 0 && <span>{run.stepCount} steps</span>}
+                            <span className="capitalize">{run.trigger.toLowerCase()}</span>
+                          </div>
+                          {run.error && !isExpanded && (
+                            <p className="mt-2 truncate text-xs text-g-red" title={run.error}>
+                              {run.error}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {isExpanded && hasDetails && (
-                    <div className="border-t border-border bg-muted/20 px-4 py-4">
-                      {run.error && (
-                        <div className="mb-3">
-                          <p className="mb-1 text-xs font-medium text-muted-foreground">
-                            Error
-                          </p>
-                          <p className="text-xs text-g-red">{run.error}</p>
-                        </div>
-                      )}
-                      {run.output != null && (
-                        <div className="mb-3">
-                          <p className="mb-1 text-xs font-medium text-muted-foreground">
-                            Output
-                          </p>
-                          {(() => {
-                            const outputId = `${run.id}-output`;
-                            const showRaw = showRawOutput.has(outputId);
-                            const isGmail = isGmailOutput(run.output);
-                            const isSimple = isSimpleObject(run.output);
-                            const isString = typeof run.output === "string";
-                            const outputSize = getOutputSize(run.output);
-                            const isLarge = outputSize > 1000;
-
-                            return (
-                              <>
-                                {!showRaw && (isGmail || isSimple) ? (
-                                  <div className="rounded-md bg-muted/50 p-3">
-                                    {isGmail ? formatGmailOutput(run.output) : formatSimpleObject(run.output)}
-                                  </div>
-                                ) : (
-                                  <>
-                                    {isLarge && !showRaw && (
-                                      <p className="mb-1 text-xs text-muted-foreground">
-                                        {outputSize.toLocaleString()} characters
-                                      </p>
-                                    )}
-                                    <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md bg-card px-3 py-2 text-xs font-mono">
-                                      {showRaw || !isLarge ? formatOutput(run.output) : truncateOutput(run.output)}
-                                    </pre>
-                                  </>
-                                )}
-                                {(!isString || isLarge) && (
-                                  <button
-                                    onClick={() => toggleRawOutput(outputId)}
-                                    className="mt-1 text-xs text-muted-foreground hover:text-foreground"
-                                  >
-                                    {showRaw ? "Show less" : isLarge ? `Show full (${outputSize.toLocaleString()} chars)` : "Show raw"}
-                                  </button>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      {run.steps.length > 0 && (
-                        <div>
-                          <p className="mb-2 text-xs font-medium text-muted-foreground">
-                            Steps ({run.steps.length})
-                          </p>
-                          <div className="space-y-2">
-                            {run.steps.map((step, idx) => (
-                              <div
-                                key={step.nodeId}
-                                className="rounded-md border border-border/50 bg-background/50 px-3 py-2.5"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-muted-foreground">
-                                    {idx + 1}.
-                                  </span>
-                                  <span className="font-mono text-xs">
-                                    {step.toolSlug ?? "LLM Chatbot"}
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      "ml-auto text-xs",
-                                      getStatusTextColor(step.status),
-                                    )}
-                                  >
-                                    {step.status.toLowerCase()}
-                                  </span>
-                                </div>
-                                {step.error && (
-                                  <p className="mt-1 text-xs text-g-red">{step.error}</p>
-                                )}
-                                {step.output != null && (
-                                  <div className="mt-2">
-                                    {(() => {
-                                      const outputId = `${run.id}-${step.nodeId}`;
-                                      const showRaw = showRawOutput.has(outputId);
-                                      const isGmail = isGmailOutput(step.output);
-                                      const isSimple = isSimpleObject(step.output);
-                                      const isString = typeof step.output === "string";
-                                      const outputSize = getOutputSize(step.output);
-                                      const isLarge = outputSize > 1000;
-
-                                      return (
-                                        <>
-                                          {!showRaw && (isGmail || isSimple) ? (
-                                            <div className="rounded bg-muted/50 p-2">
-                                              {isGmail ? formatGmailOutput(step.output) : formatSimpleObject(step.output)}
-                                            </div>
-                                          ) : (
-                                            <>
-                                              {isLarge && !showRaw && (
-                                                <p className="mb-1 text-xs text-muted-foreground">
-                                                  {outputSize.toLocaleString()} characters
-                                                </p>
-                                              )}
-                                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 text-[11px] font-mono">
-                                                {showRaw || !isLarge ? formatOutput(step.output) : truncateOutput(step.output)}
-                                              </pre>
-                                            </>
-                                          )}
-                                          {(!isString || isLarge) && (
-                                            <button
-                                              onClick={() => toggleRawOutput(outputId)}
-                                              className="mt-1 text-xs text-muted-foreground hover:text-foreground"
-                                            >
-                                              {showRaw ? "Show less" : isLarge ? `Show full (${outputSize.toLocaleString()} chars)` : "Show raw"}
-                                            </button>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                    {isExpanded && hasDetails && (
+                      <div className="border-t border-border bg-muted/20 px-4 py-4">
+                        {run.error && (
+                          <div className="mb-3">
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">
+                              Error
+                            </p>
+                            <p className="text-xs text-g-red">{run.error}</p>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                        )}
+                        {run.output != null && (
+                          <div className="mb-3">
+                            <p className="mb-1 text-xs font-medium text-muted-foreground">
+                              Output
+                            </p>
+                            {(() => {
+                              const outputId = `${run.id}-output`;
+                              const showRaw = showRawOutput.has(outputId);
+                              const isGmail = isGmailOutput(run.output);
+                              const isSimple = isSimpleObject(run.output);
+                              const isString = typeof run.output === "string";
+                              const outputSize = getOutputSize(run.output);
+                              const isLarge = outputSize > 1000;
+
+                              return (
+                                <>
+                                  {!showRaw && (isGmail || isSimple) ? (
+                                    <div className="rounded-md bg-muted/50 p-3">
+                                      {isGmail ? formatGmailOutput(run.output) : formatSimpleObject(run.output)}
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {isLarge && !showRaw && (
+                                        <p className="mb-1 text-xs text-muted-foreground">
+                                          {outputSize.toLocaleString()} characters
+                                        </p>
+                                      )}
+                                      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md bg-card px-3 py-2 text-xs font-mono">
+                                        {showRaw || !isLarge ? formatOutput(run.output) : truncateOutput(run.output)}
+                                      </pre>
+                                    </>
+                                  )}
+                                  {(!isString || isLarge) && (
+                                    <button
+                                      onClick={() => toggleRawOutput(outputId)}
+                                      className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+                                    >
+                                      {showRaw ? "Show less" : isLarge ? `Show full (${outputSize.toLocaleString()} chars)` : "Show raw"}
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                        {run.steps.length > 0 && (
+                          <div>
+                            <p className="mb-2 text-xs font-medium text-muted-foreground">
+                              Steps ({run.steps.length})
+                            </p>
+                            <div className="space-y-2">
+                              {run.steps.map((step, idx) => (
+                                <div
+                                  key={step.nodeId}
+                                  className="rounded-md border border-border/50 bg-background/50 px-3 py-2.5"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs text-muted-foreground">
+                                      {idx + 1}.
+                                    </span>
+                                    <span className="font-mono text-xs">
+                                      {step.toolSlug ?? "LLM Chatbot"}
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "ml-auto text-xs",
+                                        getStatusTextColor(step.status),
+                                      )}
+                                    >
+                                      {step.status.toLowerCase()}
+                                    </span>
+                                  </div>
+                                  {step.error && (
+                                    <p className="mt-1 text-xs text-g-red">{step.error}</p>
+                                  )}
+                                  {step.output != null && (
+                                    <div className="mt-2">
+                                      {(() => {
+                                        const outputId = `${run.id}-${step.nodeId}`;
+                                        const showRaw = showRawOutput.has(outputId);
+                                        const isGmail = isGmailOutput(step.output);
+                                        const isSimple = isSimpleObject(step.output);
+                                        const isString = typeof step.output === "string";
+                                        const outputSize = getOutputSize(step.output);
+                                        const isLarge = outputSize > 1000;
+
+                                        return (
+                                          <>
+                                            {!showRaw && (isGmail || isSimple) ? (
+                                              <div className="rounded bg-muted/50 p-2">
+                                                {isGmail ? formatGmailOutput(step.output) : formatSimpleObject(step.output)}
+                                              </div>
+                                            ) : (
+                                              <>
+                                                {isLarge && !showRaw && (
+                                                  <p className="mb-1 text-xs text-muted-foreground">
+                                                    {outputSize.toLocaleString()} characters
+                                                  </p>
+                                                )}
+                                                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-muted px-2 py-1 text-[11px] font-mono">
+                                                  {showRaw || !isLarge ? formatOutput(step.output) : truncateOutput(step.output)}
+                                                </pre>
+                                              </>
+                                            )}
+                                            {(!isString || isLarge) && (
+                                              <button
+                                                onClick={() => toggleRawOutput(outputId)}
+                                                className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+                                              >
+                                                {showRaw ? "Show less" : isLarge ? `Show full (${outputSize.toLocaleString()} chars)` : "Show raw"}
+                                              </button>
+                                            )}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div></>
+
         )}
       </main>
     </div>
