@@ -439,6 +439,7 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                       className={cn(
                         "flex items-start justify-between gap-3 px-4 py-3",
                         hasDetails && "cursor-pointer hover:bg-card",
+                        isExpanded ? "rounded-t-lg" : "rounded-lg"
                       )}
                       onClick={hasDetails ? () => toggleRun(run.id) : undefined}
                     >
