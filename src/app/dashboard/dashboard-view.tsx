@@ -222,50 +222,108 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
     queued: runs.filter((r) => r.status === "QUEUED").length,
   };
 
+  // Group runs by day for the chart
+  const runsByDay = React.useMemo(() => {
+    const groups = new Map<string, { succeeded: number; failed: number; total: number }>();
+
+    runs.forEach((run) => {
+      const date = new Date(run.createdAt).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric'
+      });
+
+      const existing = groups.get(date) || { succeeded: 0, failed: 0, total: 0 };
+      existing.total++;
+      if (run.status === "SUCCEEDED") existing.succeeded++;
+      if (run.status === "FAILED" || run.status === "CANCELED") existing.failed++;
+      groups.set(date, existing);
+    });
+
+    return Array.from(groups.entries())
+      .map(([date, counts]) => ({ date, ...counts }))
+      .slice(-7); // Last 7 days
+  }, [runs]);
+
   return (
     <div className="h-full overflow-y-auto bg-canvas">
       <main className="mx-auto w-full max-w-6xl px-6 py-8">
-        <div className="mb-8">
-          <p className="text-[11px] font-medium tracking-[0.16em] text-brand uppercase">
-            Overview
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">Dashboard</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            All workflow runs across your account
-          </p>
+        <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-medium tracking-[0.16em] text-brand uppercase">
+              Overview
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">Dashboard</h1>
+            <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+              Workflow run history and performance metrics
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-ok" />
+              {stats.succeeded} succeeded
+            </span>
+            <span className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+              {stats.total} total runs
+            </span>
+          </div>
         </div>
 
-        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">Total</p>
-            <p className="mt-1 text-2xl font-semibold">{stats.total}</p>
+        {runsByDay.length > 0 && (
+          <div className="mb-8 rounded-lg border border-border bg-card p-6">
+            <h2 className="mb-4 text-sm font-medium text-foreground">Activity (Last 7 Days)</h2>
+            <div className="flex items-end justify-between gap-2 h-32">
+              {runsByDay.map((day, idx) => {
+                const maxHeight = Math.max(...runsByDay.map((d) => d.total));
+                const height = (day.total / maxHeight) * 100;
+                const successRate = day.total > 0 ? (day.succeeded / day.total) * 100 : 0;
+
+                return (
+                  <div key={idx} className="flex flex-1 flex-col items-center gap-2">
+                    <div className="relative w-full flex flex-col-reverse gap-0.5">
+                      {day.succeeded > 0 && (
+                        <div
+                          className="w-full rounded-t bg-g-green transition-all hover:opacity-80"
+                          style={{ height: `${(day.succeeded / maxHeight) * 100}%` }}
+                          title={`${day.succeeded} succeeded`}
+                        />
+                      )}
+                      {day.failed > 0 && (
+                        <div
+                          className="w-full rounded-t bg-g-red transition-all hover:opacity-80"
+                          style={{ height: `${(day.failed / maxHeight) * 100}%` }}
+                          title={`${day.failed} failed`}
+                        />
+                      )}
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs font-medium">{day.total}</p>
+                      <p className="text-[10px] text-muted-foreground">{day.date}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-4 flex items-center justify-center gap-4 text-xs">
+              <div className="flex items-center gap-1.5">
+                <div className="size-2.5 rounded-[2px] bg-g-green" />
+                <span className="text-muted-foreground">Succeeded</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="size-2.5 rounded-[2px] bg-g-red" />
+                <span className="text-muted-foreground">Failed</span>
+              </div>
+            </div>
           </div>
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">Succeeded</p>
-            <p className="mt-1 text-2xl font-semibold text-g-green">{stats.succeeded}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">Failed</p>
-            <p className="mt-1 text-2xl font-semibold text-g-red">{stats.failed}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">Running</p>
-            <p className="mt-1 text-2xl font-semibold text-g-blue">{stats.running}</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-xs text-muted-foreground">Queued</p>
-            <p className="mt-1 text-2xl font-semibold">{stats.queued}</p>
-          </div>
-        </div>
+        )}
 
         {runs.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
+          <div className="rounded-lg border border-border bg-card px-6 py-16 text-center">
             <p className="text-sm text-muted-foreground">
               No runs yet. Create a workflow and run it to see results here.
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {runs.map((run) => {
               const duration = formatDuration(run.startedAt, run.finishedAt);
               const isExpanded = expandedRuns.has(run.id);
@@ -274,12 +332,12 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
               return (
                 <div
                   key={run.id}
-                  className="rounded-lg border border-border bg-card transition-colors"
+                  className="rounded-lg border border-border bg-card/50 backdrop-blur-sm transition-colors"
                 >
                   <div
                     className={cn(
                       "flex items-start justify-between gap-3 px-4 py-3",
-                      hasDetails && "cursor-pointer hover:bg-muted/50",
+                      hasDetails && "cursor-pointer hover:bg-card",
                     )}
                     onClick={hasDetails ? () => toggleRun(run.id) : undefined}
                   >
@@ -334,7 +392,7 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                   </div>
 
                   {isExpanded && hasDetails && (
-                    <div className="border-t border-border bg-muted/30 px-4 py-3">
+                    <div className="border-t border-border bg-muted/20 px-4 py-4">
                       {run.error && (
                         <div className="mb-3">
                           <p className="mb-1 text-xs font-medium text-muted-foreground">
@@ -397,7 +455,7 @@ export function DashboardView({ runs: initialRuns }: { runs: DashboardRun[] }) {
                             {run.steps.map((step, idx) => (
                               <div
                                 key={step.nodeId}
-                                className="rounded-md border border-border bg-card px-3 py-2"
+                                className="rounded-md border border-border/50 bg-background/50 px-3 py-2.5"
                               >
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-muted-foreground">
